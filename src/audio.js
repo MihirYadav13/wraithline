@@ -717,4 +717,75 @@ export class AudioEngine {
     n.start(t);
     n.stop(t + dur);
   }
+
+  thunder(outside, vol = 1) {
+    if (!this.ctx) return;
+    const t = this.t;
+    const dur = rand(3.5, 6);
+    const n = this.src(this.brown);
+    const lp = this.filter('lowpass', outside ? 900 : 300, 0.7);
+    lp.frequency.exponentialRampToValueAtTime(outside ? 120 : 80, t + dur);
+    const g = this.gain(0);
+    // a sharp crack, then a long rolling rumble with random swells
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(1.6 * vol, t + 0.06);
+    let k = 0.3;
+    while (k < dur - 0.4) {
+      g.gain.linearRampToValueAtTime(rand(0.3, 1.1) * vol, t + k);
+      k += rand(0.2, 0.6);
+    }
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    n.connect(lp).connect(g).connect(this.master);
+    const s = this.gain(0.4);
+    g.connect(s).connect(this.reverb);
+    n.start(t, Math.random() * 3);
+    n.stop(t + dur + 0.1);
+  }
+
+  crackle(pos) {
+    if (!this.ctx) return;
+    const t = this.t;
+    const o = this.out(pos, { vol: rand(0.15, 0.4), reverb: 0.1 });
+    const n = this.src();
+    const g = this.gain();
+    this.env(g.gain, t, 0.001, 1, rand(0.01, 0.04));
+    n.connect(this.filter('bandpass', rand(1500, 5000), 1.5)).connect(g).connect(o.input);
+    n.start(t, Math.random() * 2);
+    n.stop(t + 0.08);
+  }
+
+  owl(pos) {
+    if (!this.ctx) return;
+    let t = this.t;
+    const o = this.out(pos, { vol: 0.5, reverb: 0.6, occlude: false, ref: 6 });
+    for (const [f, len, gap] of [[390, 0.35, 0.25], [370, 0.18, 0.12], [365, 0.5, 0]]) {
+      const s = this.osc('sine', f);
+      s.frequency.linearRampToValueAtTime(f * 0.92, t + len);
+      const g = this.gain(0);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.6, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      s.connect(g).connect(o.input);
+      s.start(t);
+      s.stop(t + len + 0.05);
+      t += len + gap;
+    }
+  }
+
+  // electronics hum and fans inside the van
+  setVanHum(on) {
+    if (!this.ctx) return;
+    if (!this.hum) {
+      const n = this.src(this.brown);
+      const g = this.gain(0);
+      n.connect(this.filter('bandpass', 180, 0.8)).connect(g).connect(this.master);
+      const h = this.osc('sine', 60);
+      const hg = this.gain(0.15);
+      h.connect(hg).connect(g);
+      n.start();
+      h.start();
+      this.hum = g;
+    }
+    this.hum.gain.setTargetAtTime(on ? 0.12 : 0, this.t, 0.4);
+  }
 }

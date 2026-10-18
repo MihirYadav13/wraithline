@@ -1,10 +1,19 @@
 # Wraithline
 
 A first-person, single-player ghost-hunting investigation game that runs in the browser.
-It's inspired by the co-op ghost-hunting genre (Phasmophobia and similar), but every model,
-texture and sound is original: geometry is built from primitives, textures are painted on
-canvases at load time, and all audio is synthesised live with the Web Audio API. There are
-no asset files.
+It's inspired by the co-op ghost-hunting genre (Phasmophobia and similar). Nothing is taken
+from Phasmophobia: furniture and surface materials are CC0 (public-domain) scans from
+[Poly Haven](https://polyhaven.com) (see `public/assets/CREDITS.md`); the ghost, equipment,
+van and buildings are modelled in code; and all audio is synthesised live with the Web Audio API.
+
+## Maps
+
+| Map | Description |
+| --- | --- |
+| **14 Willow Lane** | Single-storey family home: hallway, master bedroom, bathroom, nursery, kitchen, dining and living room. Picket fence, front yard. |
+| **Pine Hollow Cabin** | Log cabin in a forest: log walls, plank ceilings, wall sconces, wood stove, iron bed frames, bunk room, porch and a fire pit. Thick fog. |
+
+Pick the map on the main menu. Both have rain, lightning and thunder.
 
 ## Run it
 
@@ -70,7 +79,9 @@ throws things). Read about them in the journal.
 | File | What it does |
 | --- | --- |
 | `src/main.js` | Game loop, input, sanity, hunts, van monitors, rain, end-of-contract report |
-| `src/level.js` | The house (grid-based walls, doors, windows, lights, furniture), yard, van, pathfinding, static mesh merging |
+| `src/level.js` | Map engine: grid-based walls, doors, windows, lights, yard, van, pathfinding, static mesh merging |
+| `src/maps/*.js` | Map definitions: room layout, doors, windows, furniture, exterior |
+| `src/assets.js` | Loads the Poly Haven textures/models and simplifies dense meshes at load time |
 | `src/ghost.js` | Ghost model and AI (wandering, interactions, apparitions, hunts) |
 | `src/ghostTypes.js` | Evidence, ghost types and their modifiers |
 | `src/items.js` | Equipment models and behaviour |
@@ -79,4 +90,4 @@ throws things). Read about them in the journal.
 | `src/textures.js` | Procedural canvas textures |
 | `src/ui.js` | HUD, journal and menus |
 
-The menu has a **Graphics** setting; use *Low* on integrated GPUs.
+The menu has a **Graphics** setting; use *Low* on integrated GPUs (it disables bloom and the moon shadow and lowers the render resolution).

@@ -248,10 +248,11 @@ export function shingles(seed = 11) {
 export function plaster(seed = 12) {
   const [c, x] = mk(256);
   const r = rng(seed);
-  x.fillStyle = '#9a968c';
+  x.fillStyle = '#b4b0a6';
   x.fillRect(0, 0, 256, 256);
-  grime(x, 256, 256, r, 0.35, 14);
-  return toTex(c, 2);
+  // fine stipple only: big grime blobs read as a broken, tiled ceiling
+  grime(x, 256, 256, r, 0.06, 12);
+  return toTex(c, 3);
 }
 
 export function doorWood(seed = 13) {
@@ -462,5 +463,30 @@ export function pegboard() {
     x.fill();
   }
   grime(x, 256, 256, rng(51), 0.2, 10);
+  return toTex(c, 0.5);
+}
+
+// Old quilted mattress: diamond stitching, yellowed and stained.
+export function mattress(seed = 61) {
+  const [c, x] = mk(256);
+  const r = rng(seed);
+  x.fillStyle = '#8a8478';
+  x.fillRect(0, 0, 256, 256);
+  for (let i = -8; i < 8; i++) {
+    for (let j = -8; j < 8; j++) {
+      const cx = i * 32 + (j % 2 ? 16 : 0), cy = j * 16;
+      const g = x.createRadialGradient(cx, cy, 2, cx, cy, 18);
+      g.addColorStop(0, 'rgba(255,250,235,0.18)');
+      g.addColorStop(1, 'rgba(0,0,0,0.25)');
+      x.fillStyle = g;
+      x.beginPath();
+      x.moveTo(cx, cy - 16);
+      x.lineTo(cx + 16, cy);
+      x.lineTo(cx, cy + 16);
+      x.lineTo(cx - 16, cy);
+      x.fill();
+    }
+  }
+  grime(x, 256, 256, r, 0.55, 20);
   return toTex(c, 0.5);
 }

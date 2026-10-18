@@ -202,7 +202,8 @@ export class Ghost {
     this.name = `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
     this.age = Math.floor(rand(8, 90));
     this.respondsTo = Math.random() < 0.5 ? 'everyone' : 'people who are alone';
-    this.favRoom = 1 + Math.floor(Math.random() * (L.rooms.length - 1));
+    // haunt any room except a hallway
+    this.favRoom = pick(L.rooms.filter((r) => !/hallway/i.test(r.name))).id;
     this.pos = L.randomPointInRoom(this.favRoom);
     this.model = buildGhostModel();
     this.model.visible = false;
@@ -365,7 +366,7 @@ export class Ghost {
     if (pdist < 9 && g.player.inHouse) options.push(['event', this.type.name === 'Oni' ? 3 : 1.2]);
     const book = g.items.list.find((i) => i.type === 'book' && !i.held && !i.written && near(i.mesh.position, 3.5));
     if (book && this.hasEv('WRITING')) options.push(['write', 5]);
-    if (this.room === 6 && !L.tv.on) options.push(['tv', 0.8]);
+    if (L.tv && !L.tv.on && L.roomAt(L.tv.pos.x, L.tv.pos.z) === this.room) options.push(['tv', 0.8]);
     if (this.type.name === 'Banshee') options.push(['wail', 0.8]);
 
     let total = options.reduce((s, o) => s + o[1], 0);

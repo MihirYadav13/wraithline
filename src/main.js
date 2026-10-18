@@ -1,5 +1,14 @@
 import * as THREE from 'three';
-import { Level, ROOMS, GW, GH } from './level.js';
+import { Level } from './level.js';
+import { Assets } from './assets.js';
+import willow from './maps/willow.js';
+import cabin from './maps/cabin.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const MAPS = { willow, cabin };
 import { Player } from './player.js';
 import { AudioEngine } from './audio.js';
 import { Items } from './items.js';
@@ -55,6 +64,8 @@ class Game {
     this.audio = new AudioEngine();
     this.state = 'menu';
     this.diffKey = 'amateur';
+    this.mapKey = 'willow';
+    this.assets = new Assets(this.renderer);
     this.locked = false;
     this.last = performance.now();
     this.bindMenu();
@@ -75,6 +86,16 @@ class Game {
         desc.textContent = DIFFS[this.diffKey].desc;
       })
     );
+    const mapDesc = document.getElementById('mapdesc');
+    mapDesc.textContent = MAPS.willow.blurb;
+    document.querySelectorAll('#maps button').forEach((b) =>
+      b.addEventListener('click', () => {
+        document.querySelectorAll('#maps button').forEach((x) => x.classList.remove('sel'));
+        b.classList.add('sel');
+        this.mapKey = b.dataset.m;
+        mapDesc.textContent = MAPS[this.mapKey].blurb;
+      })
+    );
     document.getElementById('vol').addEventListener('input', (e) => this.audio.setVolume(+e.target.value));
     document.getElementById('sens').addEventListener('input', (e) => this.player && (this.player.sensitivity = +e.target.value));
     document.getElementById('start').addEventListener('click', () => this.start());
@@ -83,8 +104,16 @@ class Game {
     document.getElementById('again').addEventListener('click', () => location.reload());
   }
 
-  start() {
+  async start() {
+    if (this.starting) return;
+    this.starting = true;
+    const btn = document.getElementById('start');
+    btn.disabled = true;
+    // the click is the user gesture that unlocks audio; resume it before the async load
     this.audio.init();
+    this.audio.resume();
+    await this.assets.load((p) => (btn.textContent = `Loading... ${Math.round(p * 100)}%`));
+    this.map = MAPS[this.mapKey];
     this.audio.resume();
     this.audio.setVolume(+document.getElementById('vol').value);
     this.diff = DIFFS[this.diffKey];
@@ -102,7 +131,7 @@ class Game {
   buildWorld() {
     const scene = (this.scene = new THREE.Scene());
     scene.background = new THREE.Color(0x03050c);
-    scene.fog = new THREE.FogExp2(0x03050c, 0.05);
+    scene.fog = new THREE.FogExp2(0x03050c, this.map.fog ?? 0.05);
     const cam = (this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.03, 140));
     scene.add(cam);
 
@@ -110,12 +139,14 @@ class Game {
     scene.add(this.ambient);
     const moon = new THREE.DirectionalLight(0x5a6aa8, 0.55);
     moon.position.set(-20, 30, 35);
-    moon.target.position.set(11, 0, 10);
+    moon.target.position.set(this.map.GW / 2, 0, this.map.GH / 2);
     moon.castShadow = true;
     moon.shadow.mapSize.set(2048, 2048);
     Object.assign(moon.shadow.camera, { left: -26, right: 26, top: 26, bottom: -26, near: 1, far: 100 });
-    moon.shadow.bias = -0.0008;
+    moon.shadow.bias = -0.0005;
+    moon.shadow.normalBias = 0.04;
     scene.add(moon, moon.target);
+    this.moon = moon;
     const Q = { low: { pr: 0.75, moon: 0, flash: 512 }, medium: { pr: 1, moon: 1024, flash: 1024 }, high: { pr: Math.min(window.devicePixelRatio, 1.5), moon: 2048, flash: 1024 } }[this.quality];
     this.renderer.setPixelRatio(Q.pr);
     moon.castShadow = Q.moon > 0;
@@ -125,9 +156,19 @@ class Game {
     if (Q.moon) moon.shadow.mapSize.set(Q.moon, Q.moon);
     if (this.quality === 'low') this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.flashShadow = Q.flash;
+    // bloom makes bulbs, embers, screens and the flashlight hotspot glow (skipped on Low)
+    this.composer = null;
+    if (this.quality !== 'low') {
+      this.composer = new EffectComposer(this.renderer);
+      this.composer.addPass(new RenderPass(scene, cam));
+      this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth / 2, window.innerHeight / 2), 0.38, 0.4, 0.9));
+      this.composer.addPass(new OutputPass());
+    }
 
-    this.level = new Level(scene);
+    this.level = new Level(scene, this.map, this.assets);
     this.player = new Player(cam, this.level);
+    const vb = this.level.vanBounds;
+    this.player.pos.set((vb.minX + vb.maxX) / 2, 0, vb.maxZ - 1.1);
     this.player.update(0, this.audio);
 
     // hand-held lights live on the camera
@@ -135,7 +176,9 @@ class Game {
     this.flashlight.position.set(0.15, -0.15, 0);
     this.flashlight.castShadow = true;
     this.flashlight.shadow.mapSize.set(this.flashShadow, this.flashShadow);
-    this.flashlight.shadow.bias = -0.0006;
+    // normalBias removes the striped shadow acne on walls/ceiling seen at grazing angles
+    this.flashlight.shadow.bias = -0.0002;
+    this.flashlight.shadow.normalBias = 0.035;
     this.flashlight.shadow.camera.near = 0.1;
     cam.add(this.flashlight);
     this.flashlight.target.position.set(0.1, -0.2, -5);
@@ -183,6 +226,10 @@ class Game {
     this.actSampleT = 0;
     this.clockT = 1;
     this.creakT = rand(10, 25);
+    this.thunderT = rand(15, 35);
+    this.flash = 0;
+    this.owlT = rand(20, 50);
+    this.crackleT = 0;
     this.whisperT = rand(20, 40);
     this.heartT = 0;
     this.tvT = 0;
@@ -250,8 +297,9 @@ class Game {
     for (let k = 0; k < 6; k++) {
       d.x = c.x + rand(-14, 14);
       d.z = c.z + rand(-14, 14);
-      const inHouse = d.x > -0.6 && d.x < GW + 0.6 && d.z > -0.6 && d.z < GH + 0.6;
-      const inVan = this.level.vanBounds && d.x > 4.7 && d.x < 7.3 && d.z > 17.4 && d.z < 24.1;
+      const L = this.level, vb = L.vanBounds;
+      const inHouse = d.x > -0.6 && d.x < L.GW + 0.6 && d.z > -0.6 && d.z < L.GH + (L.map.id === 'cabin' ? 1.9 : 0.6);
+      const inVan = d.x > vb.minX - 0.1 && d.x < vb.maxX + 0.1 && d.z > vb.minZ - 0.1 && d.z < vb.maxZ + 1.6;
       if (!inHouse && !inVan) break;
       d.x = -999;
     }
@@ -458,6 +506,7 @@ class Game {
   }
 
   tvOn(sec) {
+    if (!this.level.tv) return;
     this.tvT = sec;
     this.level.tv.on = true;
     this.level.tv.mat.color.setHex(0xffffff);
@@ -603,6 +652,45 @@ class Game {
       const r = Math.floor(Math.random() * L.rooms.length);
       A.creak(L.randomPointInRoom(r).setY(2.4), { vol: 0.25 });
     }
+    // lightning: the sky and every window flash, thunder follows after a short delay
+    this.thunderT -= dt;
+    if (this.thunderT <= 0) {
+      this.thunderT = rand(25, 70);
+      this.flash = 0.45;
+      const delay = rand(0.6, 2.5);
+      setTimeout(() => A.thunder(!p.inHouse, delay < 1.2 ? 1 : 0.6), delay * 1000);
+    }
+    if (this.flash > 0) {
+      this.flash -= dt;
+      const on = this.flash > 0.3 || (this.flash > 0.1 && this.flash < 0.18);
+      this.moon.intensity = on ? 3.5 : 0.55;
+      this.ambient.intensity = this.nv ? 2.2 : on ? 1.4 : 0.55;
+      L.innerGlass.forEach((m) => (m.emissiveIntensity = on ? 9 : 1));
+    }
+    // campfire / stove flicker and crackle
+    const fl = 0.75 + Math.random() * 0.5;
+    if (L.fireLight) {
+      L.fireLight.intensity = 3 * fl;
+      L.emberMat.emissiveIntensity = 1.2 * fl;
+    }
+    if (L.stoveLight) {
+      L.stoveLight.intensity = 2.2 * fl;
+      L.stoveGlow.emissiveIntensity = 1.6 * fl;
+    }
+    this.crackleT -= dt;
+    if (this.crackleT <= 0) {
+      this.crackleT = rand(0.08, 0.5);
+      for (const fire of [L.fireLight, L.stoveLight]) if (fire && fire.position.distanceTo(p.pos) < 9) A.crackle(fire.position);
+    }
+    if (L.map.ground === 'forest') {
+      this.owlT -= dt;
+      if (this.owlT <= 0) {
+        this.owlT = rand(30, 70);
+        const a = rand(0, Math.PI * 2);
+        A.owl(new THREE.Vector3(p.pos.x + Math.cos(a) * 25, 8, p.pos.z + Math.sin(a) * 25));
+      }
+    }
+    A.setVanHum(L.inVan(p.pos));
     if (this.sanity < 35 && p.inHouse) {
       this.whisperT -= dt;
       if (this.whisperT <= 0) {
@@ -620,7 +708,7 @@ class Game {
         A.heartbeat(0.3 + (1 - clamp(d / 18, 0, 1)) * 0.6);
       }
     }
-    if (this.tvT > 0) {
+    if (this.tvT > 0 && L.tv) {
       this.tvT -= dt;
       const { ctx, tex } = L.tv.canvas;
       const img = ctx.createImageData(64, 48);
@@ -834,8 +922,9 @@ class Game {
       const { ctx, tex } = L.mapMon;
       ctx.fillStyle = '#050608';
       ctx.fillRect(0, 0, 448, 280);
-      const sc = 18, ox = 26, oy = 12;
-      for (const r of ROOMS) {
+      const GW = L.GW, GH = L.GH;
+      const sc = Math.min(396 / GW, 256 / GH), ox = (448 - GW * sc) / 2, oy = (280 - GH * sc) / 2;
+      for (const r of L.rooms) {
         const [x0, z0, x1, z1] = r.rect;
         ctx.fillStyle = '#c8ccd2';
         ctx.fillRect(ox + x0 * sc, oy + z0 * sc, (x1 - x0) * sc, (z1 - z0) * sc);
@@ -909,7 +998,8 @@ class Game {
   render() {
     const r = this.renderer;
     r.clear();
-    r.render(this.scene, this.camera);
+    if (this.composer) this.composer.render();
+    else r.render(this.scene, this.camera);
     if (this.state !== 'ended') {
       r.clearDepth();
       r.render(this.vmScene, this.camera);
@@ -918,6 +1008,7 @@ class Game {
 
   resize() {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.composer?.setSize(window.innerWidth, window.innerHeight);
     if (this.camera) {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
