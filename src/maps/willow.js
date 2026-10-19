@@ -46,6 +46,7 @@ export default {
   ],
   van: { x0: 4.8, z0: 17.5 },
   ground: 'grass',
+  env: { weather: 'rain', crickets: 0.4 },
   furnish(L) {
     const M = L.mat;
     // ---- Master bedroom
@@ -219,6 +220,33 @@ export default {
   },
   exterior(L) {
     const M = L.mat;
+    // suburban street: asphalt road, sodium streetlights, neighbouring houses with a few lit windows
+    const road = mesh(planeGeo(80, 7), new THREE.MeshStandardMaterial({ map: TX.dirt(55), color: 0x3a3c40, roughness: 0.6 }), 11, 0.004, 28.5);
+    road.castShadow = false;
+    L.add(road);
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0x8a8060 });
+    for (let x = -26; x < 50; x += 4) L.add(mesh(planeGeo(1.8, 0.12), lineMat, x, 0.006, 28.5));
+    for (const lx of [0, 18, 34]) {
+      L.model('street_lamp_01', lx, 25.3, Math.PI);
+      const sodium = new THREE.PointLight(0xff9a40, 6, 10, 2);
+      sodium.position.set(lx, 3.6, 25.8);
+      L.add(sodium);
+    }
+    const sidingN = std(0x5a5e66, 0.9), roofN = std(0x1c1c1e, 0.9);
+    for (const [hx, w, d, lit] of [[-6, 9, 8, [1]], [8, 10, 8, []], [24, 9, 8, [0, 2]], [38, 8, 7, [1]]]) {
+      const hz = 37;
+      L.add(mesh(boxGeo(w, 3, d), sidingN, hx, 1.5, hz));
+      const r = mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1), roofN, hx, 4.2, hz);
+      r.geometry.rotateY(Math.PI / 4);
+      r.scale.set(w + 0.6, 2.4, d + 0.6);
+      L.add(r);
+      for (let i = 0; i < 3; i++) {
+        const glow = lit.includes(i);
+        const win = mesh(planeGeo(1, 1.1), new THREE.MeshStandardMaterial({ color: 0x05070a, emissive: glow ? 0xffb860 : 0x0a0e16, emissiveIntensity: glow ? 1.4 : 1 }), hx - w / 3 + (i * w) / 3, 1.7, hz - d / 2 - 0.01);
+        win.geometry.rotateX(-Math.PI / 2);
+        L.add(win);
+      }
+    }
     const path = mesh(planeGeo(1.6, 2.6), new THREE.MeshStandardMaterial({ map: TX.dirt(10), roughness: 1 }), 10.5, 0.005, 16.1);
     const path2 = mesh(planeGeo(4.6, 1.4), path.material, 8.8, 0.005, 17.1);
     path2.castShadow = false;

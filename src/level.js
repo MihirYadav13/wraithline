@@ -96,6 +96,8 @@ export class Level {
       logs: A.material('wood_plank_wall', 2.2, { color: 0xa09080 }),
       planks: A.material('weathered_planks', 2),
     });
+    this.wallMats.padded = new THREE.MeshStandardMaterial({ map: TX.mattress(83), color: 0xc8c4b4, roughness: 1 });
+    this.wallMats.asylum = new THREE.MeshStandardMaterial({ map: TX.twoTone('#2e5652', '#b5ae96', this.H), normalMap: A.material('painted_plaster_wall', 2).normalMap, roughness: 0.9 });
     this.ceilMat = A.material(this.map.ceiling || 'white_plaster_rough_01', 2.5, { color: this.map.ceilColor ?? 0xbcb8ae });
     this.trimMat = std(this.map.trimColor ?? 0xcfc8b8, 0.55);
     this.capMat = std(0x2a2520, 0.9);
@@ -225,12 +227,17 @@ export class Level {
 
   addLintel(o, a, b, A, B, bottom) {
     const h = this.H - bottom;
+    const shiftV = (g) => {
+      const uv = g.attributes.uv;
+      for (const f of [0, 1, 4, 5]) for (let k = 0; k < 4; k++) uv.setY(f * 4 + k, uv.getY(f * 4 + k) + bottom);
+      return g;
+    };
     if (o === 'v') {
       const mats = [this.wallMatFor(B), this.wallMatFor(A), this.capMat, this.capMat, this.capMat, this.capMat];
-      this.add(mesh(boxGeo(WALL_T, h, 1), mats, a, bottom + h / 2, b + 0.5));
+      this.add(mesh(shiftV(boxGeo(WALL_T, h, 1)), mats, a, bottom + h / 2, b + 0.5));
     } else {
       const mats = [this.capMat, this.capMat, this.capMat, this.capMat, this.wallMatFor(B), this.wallMatFor(A)];
-      this.add(mesh(boxGeo(1, h, WALL_T), mats, a + 0.5, bottom + h / 2, b));
+      this.add(mesh(shiftV(boxGeo(1, h, WALL_T)), mats, a + 0.5, bottom + h / 2, b));
     }
   }
 
@@ -291,11 +298,25 @@ export class Level {
       const w = x1 - x0, d = z1 - z0;
       const lamps = r.lamps || [[(x0 + x1) / 2, (z0 + z1) / 2]];
       // one light per room (fixtures are just meshes) keeps the per-pixel light count low
-      const light = new THREE.PointLight(0xffd29a, 0, Math.max(w, d) * 0.8 + 2.5, 2);
+      const lightColor = this.map.lightColor ?? 0xffd29a;
+      const light = new THREE.PointLight(lightColor, 0, Math.max(w, d) * 0.8 + 2.5, 2);
       light.position.set((x0 + x1) / 2, this.H - 0.45, (z0 + z1) / 2);
       light.userData.base = 5 + w * d * (lamps.length > 1 ? 0.3 : 0.22);
+      if (r.split) {
+        // long corridors: one light per fixture so the far ends aren't black
+        light.userData.base /= lamps.length * 0.7;
+        light.distance = 7;
+        light.position.set(lamps[0][0], this.H - 0.45, lamps[0][1]);
+        for (const [lx, lz] of lamps.slice(1)) {
+          const extra = light.clone();
+          extra.position.set(lx, this.H - 0.45, lz);
+          this.add(extra);
+          r.lights.push(extra);
+        }
+      }
       this.add(light);
       r.lights.push(light);
+      r.unstable = this.map.fixture === 'tube';
       if (r.sconce) {
         // wall sconce: brass arm and backplate, warm fabric shade (cabin style)
         const [sx, sz, n] = r.sconce;
@@ -315,6 +336,20 @@ export class Level {
         light.position.set(sx + n[0] * 0.45, 1.95, sz + n[1] * 0.45);
       }
       for (const [lx, lz] of r.sconce ? [] : lamps) {
+        if (this.map.fixture === 'tube') {
+          // fluorescent tube fixture: metal housing with a cold glowing diffuser
+          const along = r.tubeAxis ?? (w >= d ? 'x' : 'z');
+          const g = new THREE.Group();
+          g.position.set(lx, this.H - 0.04, lz);
+          if (along === 'z') g.rotation.y = Math.PI / 2;
+          g.add(mesh(new THREE.BoxGeometry(1.25, 0.06, 0.2), this.mat.metal, 0, 0, 0));
+          const tubeMat = new THREE.MeshStandardMaterial({ color: 0xd8e0e8, emissive: 0xe6f0ff, emissiveIntensity: 0 });
+          g.add(mesh(new THREE.BoxGeometry(1.15, 0.03, 0.14), tubeMat, 0, -0.035, 0));
+          g.traverse((o) => (o.castShadow = false));
+          this.add(g);
+          r.bulbs.push(tubeMat);
+          continue;
+        }
         // flush-mount ceiling fixture: brass rim + frosted glass dome that glows when on
         const rim = mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.025, 24), this.mat.brass, lx, this.H - 0.0125, lz);
         rim.castShadow = false;
@@ -346,14 +381,18 @@ export class Level {
     room.switchToggle.position.y = on ? 0.012 : -0.012;
   }
 
-  updateLights(dt, ghostPos, hunting) {
+  updateLights(dt, ghostPos, hunting, audio) {
     for (const r of this.rooms) {
       if (r.flicker > 0) r.flicker -= dt;
+      else if (r.unstable && r.lightOn && Math.random() < dt * 0.02) {
+        r.flicker = 0.4 + Math.random() * 1.2;
+        audio?.buzz(r.center.clone().setY(this.H - 0.2), r.flicker, 0.18);
+      }
       let k = r.lightOn ? 1 : 0;
       if (k && hunting && ghostPos && ghostPos.distanceTo(r.center) < 7) k = Math.random() < 0.5 ? 0.05 : 1;
       if (k && r.flicker > 0) k = Math.random() < 0.45 ? 0.05 : 1;
       r.lights.forEach((l) => (l.intensity = l.userData.base * k));
-      r.bulbs.forEach((b) => (b.emissiveIntensity = 1.3 * k));
+      r.bulbs.forEach((b) => (b.emissiveIntensity = (r.unstable ? 0.7 : 1.3) * k));
     }
     for (const w of this.windows) {
       const on = w.room.lightOn && w.room.lights[0].intensity > 0.1;
@@ -527,6 +566,9 @@ export class Level {
         } else if (room) {
           this.windows.push({ room, mat: glassMat });
         }
+        if (side < 0 && this.map.windowBars) {
+          for (let k = -2; k <= 2; k++) g.add(mesh(new THREE.CylinderGeometry(0.012, 0.012, wh + 0.1, 6), this.mat.black, (k * ww) / 5, 0, 0.09));
+        }
         this.add(g);
       }
     }
@@ -536,13 +578,20 @@ export class Level {
   buildExterior() {
     const M = this.mat, A = this.assets, W = this.GW, D = this.GH;
     const forest = this.map.ground === 'forest';
-    const groundMat = forest ? A.material('brown_mud_leaves_01', 3, { color: 0x9a9a90 }) : new THREE.MeshStandardMaterial({ map: TX.grass(9), roughness: 1 });
+    const groundMat = forest
+      ? A.material('brown_mud_leaves_01', 3, { color: 0x9a9a90 })
+      : this.map.ground === 'snow'
+        ? new THREE.MeshStandardMaterial({ map: TX.carpet('#c4cad2', 81), roughness: 0.9 })
+        : new THREE.MeshStandardMaterial({ map: TX.grass(9), roughness: 1 });
     const ground = mesh(planeGeo(160, 160), groundMat, W / 2, 0, D / 2 + 6);
     ground.castShadow = false;
     this.add(ground);
     // roof
     this.add(mesh(new THREE.BoxGeometry(W + 0.8, 0.25, D + 0.8), M.black, W / 2, this.H + 0.125, D / 2));
-    if (this.map.roof === 'gable') {
+    if (this.map.roof === 'flat') {
+      const par = std(0x4a4a48, 0.9);
+      for (const [w, d, x, z] of [[W + 0.8, 0.25, W / 2, -0.4], [W + 0.8, 0.25, W / 2, D + 0.4], [0.25, D + 0.8, -0.4, D / 2], [0.25, D + 0.8, W + 0.4, D / 2]]) this.add(mesh(new THREE.BoxGeometry(w, 0.6, d), par, x, this.H + 0.55, z));
+    } else if (this.map.roof === 'gable') {
       // gable roof with the ridge running along x
       const rise = 2.2, half = D / 2 + 0.6, slope = Math.hypot(half, rise);
       const roofMat = A.material('weathered_planks', 2, { color: 0x6a6258 });
@@ -718,7 +767,7 @@ export class Level {
 
     // whiteboard on the front wall
     this.whiteboard = canvasTex(512, 300);
-    const wb = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.88), new THREE.MeshStandardMaterial({ map: this.whiteboard.tex, roughness: 0.4 }));
+    const wb = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.88), new THREE.MeshStandardMaterial({ map: this.whiteboard.tex, roughness: 0.95, color: 0xd6d6d0 }));
     wb.position.set(cx + 0.15, 1.55, z1 - 0.05);
     wb.rotation.y = Math.PI;
     this.add(wb);
@@ -729,7 +778,7 @@ export class Level {
     rack.position.y = 0.25;
     const rackMat = std(0x9a9ea4, 0.45, { metalness: 0.6 });
     for (const y of [0.15, 0.85]) this.b(rack, 0.38, 0.03, 4.4, rackMat, 0, y, 0);
-    for (const z of [-2.15, 0, 2.15]) this.b(rack, 0.38, 1.4, 0.03, rackMat, 0, 0, z);
+    for (const z of [-2.15, 0, 2.15]) for (const x of [-0.17, 0.17]) this.b(rack, 0.03, 1.0, 0.03, rackMat, x, 0, z);
     this.put(rack);
     this.gearSpots = [];
     for (let i = 0; i < 9; i++) this.gearSpots.push(new THREE.Vector3(x1 - 0.25, 0.25 + 0.88, z0 + 0.45 + i * 0.47));
@@ -807,6 +856,20 @@ export class Level {
     const list = this.occluders.slice();
     for (const d of this.doors) if (d.open < 0.25) list.push(d.leaf);
     return list;
+  }
+
+  // true when every way into the room is a closed door (rooms with open archways can't be sealed)
+  isSealed(id) {
+    if (this.openRooms === undefined) {
+      this.openRooms = new Set();
+      for (const o of this.map.openings) {
+        this.openRooms.add(o.o === 'v' ? this.cell(o.x - 1, o.z) : this.cell(o.x, o.z - 1));
+        this.openRooms.add(this.cell(o.x, o.z));
+      }
+    }
+    if (this.openRooms.has(id)) return false;
+    const doors = this.doors.filter((d) => d.rooms.includes(id));
+    return doors.length > 0 && doors.every((d) => d.open < 0.25);
   }
 
   isInside(x, z) {

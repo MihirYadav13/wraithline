@@ -18,7 +18,15 @@ class Item {
     this.falling = false;
     this.holdPos = new THREE.Vector3(0.22, -0.24, -0.42);
     this.holdRot = new THREE.Euler(-0.35, 0.15, 0);
+    // where the fist closes around the item (item-local), the handle axis and its radius
+    this.grip = { pos: [0, 0.04, 0], axis: 'y', r: 0.036 };
     this.mesh = this.build();
+    // invisible grab zone so thin items (UV light, incense, book) are easy to aim at
+    const box = new THREE.Box3().setFromObject(this.mesh);
+    const size = box.getSize(new THREE.Vector3()).max(new THREE.Vector3(0.14, 0.14, 0.14));
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), new THREE.MeshBasicMaterial({ visible: false }));
+    box.getCenter(hit.position);
+    this.mesh.add(hit);
     this.mesh.traverse((o) => {
       o.userData.item = this;
       if (o.isMesh) o.castShadow = true;
@@ -100,6 +108,7 @@ class EMF extends Item {
 class Thermometer extends Item {
   constructor(g) {
     super(g, 'thermo', 'Thermometer');
+    this.grip = { pos: [0, 0.035, 0], axis: 'y', r: 0.032 };
     this.electronic = true;
     this.t = 0;
     this.draw('OFF');
@@ -150,6 +159,7 @@ class Thermometer extends Item {
 class SpiritBox extends Item {
   constructor(g) {
     super(g, 'spiritbox', 'Spirit Box');
+    this.grip = { pos: [0, 0.03, 0], axis: 'y', r: 0.042 };
     this.electronic = true;
     this.freq = 88;
     this.askT = 0;
@@ -245,6 +255,7 @@ class SpiritBox extends Item {
 class UVLight extends Item {
   constructor(g) {
     super(g, 'uv', 'UV Flashlight');
+    this.grip = { pos: [0, 0.022, 0.035], axis: 'z', r: 0.021 };
     this.electronic = true;
     this.holdRot = new THREE.Euler(0, 0.05, 0);
     this.holdPos = new THREE.Vector3(0.2, -0.22, -0.38);
@@ -271,6 +282,7 @@ class UVLight extends Item {
 class Book extends Item {
   constructor(g) {
     super(g, 'book', 'Writing Book');
+    this.grip = { pos: [0.14, 0.006, 0.02], axis: 'z', r: 0.012 };
     this.written = false;
     this.holdRot = new THREE.Euler(0.9, 0, 0);
     this.holdPos = new THREE.Vector3(0.12, -0.3, -0.4);
@@ -302,9 +314,10 @@ class Book extends Item {
 class VideoCam extends Item {
   constructor(g) {
     super(g, 'camera', 'Video Camera');
+    this.grip = { pos: [0.052, 0.04, 0.02], axis: 'z', r: 0.016 };
     this.electronic = true;
     this.holdRot = new THREE.Euler(0, 0, 0);
-    this.holdPos = new THREE.Vector3(0.16, -0.2, -0.36);
+    this.holdPos = new THREE.Vector3(0.12, -0.19, -0.42);
   }
   build() {
     const g = new THREE.Group();
@@ -330,6 +343,7 @@ class VideoCam extends Item {
 class Crucifix extends Item {
   constructor(g) {
     super(g, 'crucifix', 'Crucifix');
+    this.grip = { pos: [0, 0.055, 0], axis: 'y', r: 0.016 };
     this.uses = 2;
     this.holdRot = new THREE.Euler(0, 0, 0);
   }
@@ -359,6 +373,7 @@ class Crucifix extends Item {
 class Pills extends Item {
   constructor(g) {
     super(g, 'pills', 'Sanity Pills');
+    this.grip = { pos: [0, 0.035, 0], axis: 'y', r: 0.032 };
     this.holdRot = new THREE.Euler(0, 0, 0);
   }
   build() {
@@ -382,6 +397,7 @@ class Pills extends Item {
 class Incense extends Item {
   constructor(g) {
     super(g, 'incense', 'Incense');
+    this.grip = { pos: [0, 0.06, 0], axis: 'y', r: 0.016 };
     this.lit = false;
     this.used = false;
     this.burnT = 0;

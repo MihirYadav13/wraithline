@@ -490,3 +490,33 @@ export function mattress(seed = 61) {
   grime(x, 256, 256, r, 0.55, 20);
   return toTex(c, 0.5);
 }
+
+// Institutional two-tone wall paint: dark lower band, pale upper wall, a stripe between,
+// stained and scuffed. One texture covers the full wall height (wrapT clamped).
+export function twoTone(lower = '#2f5a56', upper = '#b9b29a', wallH = 2.7, band = 1.15, seed = 71) {
+  const [c, x] = mk(256, 512);
+  const r = rng(seed);
+  const split = 512 - (band / wallH) * 512;
+  x.fillStyle = upper;
+  x.fillRect(0, 0, 256, split);
+  x.fillStyle = lower;
+  x.fillRect(0, split, 256, 512 - split);
+  x.fillStyle = 'rgba(20,20,16,0.6)';
+  x.fillRect(0, split - 6, 256, 6);
+  // water streaks running down from the ceiling
+  for (let i = 0; i < 14; i++) {
+    const px = r() * 256, len = 60 + r() * 220;
+    const g = x.createLinearGradient(0, 0, 0, len);
+    g.addColorStop(0, `rgba(60,48,30,${0.25 + r() * 0.25})`);
+    g.addColorStop(1, 'rgba(60,48,30,0)');
+    x.fillStyle = g;
+    x.fillRect(px, 0, 3 + r() * 8, len);
+  }
+  grime(x, 256, 512, r, 0.22, 18);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  t.repeat.set(1 / 1.5, 1 / wallH);
+  return t;
+}

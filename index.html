@@ -36,6 +36,7 @@
             <div id="maps">
               <button data-m="willow" class="sel">14 Willow Lane</button>
               <button data-m="cabin">Pine Hollow Cabin</button>
+              <button data-m="sanatorium">St. Agnes Sanatorium</button>
             </div>
             <p id="mapdesc"></p>
             <h3>Difficulty</h3>
@@ -73,6 +74,9 @@
     <div id="pause" class="screen hidden">
       <div class="board small">
         <h2>Paused</h2>
+        <label>Volume <input id="pvol" type="range" min="0" max="1" step="0.05" value="0.9" /></label>
+        <label>Mouse sensitivity <input id="psens" type="range" min="0.3" max="2.5" step="0.05" value="1" /></label>
+        <p class="small-tip">Click Resume (or anywhere in the game) to recapture the mouse.</p>
         <button id="resume" class="big">Resume</button>
         <button id="quit">Abandon contract</button>
       </div>

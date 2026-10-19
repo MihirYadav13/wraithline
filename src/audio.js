@@ -682,13 +682,19 @@ export class AudioEngine {
     void ctx;
   }
 
+  // per-map ambience levels (rain on/off, crickets, wind strength)
+  configure(env) {
+    this.mapEnv = env;
+  }
+
   setEnvironment(outside, fear = 0) {
     if (!this.amb) return;
     const t = this.t;
-    this.amb.windG.gain.setTargetAtTime(outside ? 0.22 : 0.07, t, 0.8);
-    this.amb.crG.gain.setTargetAtTime(outside ? 0.025 : 0.003, t, 0.8);
+    const env = this.mapEnv || { weather: 'rain', crickets: 1, wind: 1 };
+    this.amb.windG.gain.setTargetAtTime((outside ? 0.22 : 0.07) * env.wind, t, 0.8);
+    this.amb.crG.gain.setTargetAtTime((outside ? 0.025 : 0.003) * env.crickets, t, 0.8);
     this.amb.droneG.gain.setTargetAtTime(outside ? 0.02 : 0.06 + fear * 0.08, t, 1.5);
-    this.amb.rainG.gain.setTargetAtTime(outside ? 0.11 : 0.05, t, 0.8);
+    this.amb.rainG.gain.setTargetAtTime(env.weather === 'rain' ? (outside ? 0.11 : 0.05) : 0, t, 0.8);
     this.amb.rainLp.frequency.setTargetAtTime(outside ? 7000 : 600, t, 0.8);
   }
 

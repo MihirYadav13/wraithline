@@ -3,17 +3,22 @@ import { Level } from './level.js';
 import { Assets } from './assets.js';
 import willow from './maps/willow.js';
 import cabin from './maps/cabin.js';
+import sanatorium from './maps/sanatorium.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-const MAPS = { willow, cabin };
+const MAPS = { willow, cabin, sanatorium };
+
+// per-map atmosphere; maps override any of these through `env`
+const ENV = { weather: 'rain', sky: 0x03050c, fog: 0x03050c, fogDensity: 0.05, ambient: 0x1c2440, moon: 0x5a6aa8, moonI: 0.55, crickets: 1, wind: 1, owls: false, stars: false };
 import { Player } from './player.js';
 import { AudioEngine } from './audio.js';
 import { Items } from './items.js';
 import { Ghost } from './ghost.js';
 import { UI } from './ui.js';
+import { ViewModel, TORCH_GRIP } from './viewmodel.js';
 import { EVIDENCE } from './ghostTypes.js';
 import { rand, pick, clamp, mesh, std } from './util.js';
 import * as TX from './textures.js';
@@ -100,6 +105,15 @@ class Game {
     document.getElementById('sens').addEventListener('input', (e) => this.player && (this.player.sensitivity = +e.target.value));
     document.getElementById('start').addEventListener('click', () => this.start());
     document.getElementById('resume').addEventListener('click', () => this.resume());
+    // pause-menu sliders mirror the main-menu ones
+    for (const [pid, mid] of [['pvol', 'vol'], ['psens', 'sens']]) {
+      const p = document.getElementById(pid), m = document.getElementById(mid);
+      p.addEventListener('input', () => {
+        m.value = p.value;
+        m.dispatchEvent(new Event('input'));
+      });
+      m.addEventListener('input', () => (p.value = m.value));
+    }
     document.getElementById('quit').addEventListener('click', () => this.finish(false, true));
     document.getElementById('again').addEventListener('click', () => location.reload());
   }
@@ -130,14 +144,15 @@ class Game {
 
   buildWorld() {
     const scene = (this.scene = new THREE.Scene());
-    scene.background = new THREE.Color(0x03050c);
-    scene.fog = new THREE.FogExp2(0x03050c, this.map.fog ?? 0.05);
+    const env = (this.env = { ...ENV, ...this.map.env });
+    scene.background = new THREE.Color(env.sky);
+    scene.fog = new THREE.FogExp2(env.fog, env.fogDensity);
     const cam = (this.camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.03, 140));
     scene.add(cam);
 
-    this.ambient = new THREE.AmbientLight(0x1c2440, 0.55);
+    this.ambient = new THREE.AmbientLight(env.ambient, 0.55);
     scene.add(this.ambient);
-    const moon = new THREE.DirectionalLight(0x5a6aa8, 0.55);
+    const moon = new THREE.DirectionalLight(env.moon, env.moonI);
     moon.position.set(-20, 30, 35);
     moon.target.position.set(this.map.GW / 2, 0, this.map.GH / 2);
     moon.castShadow = true;
@@ -236,57 +251,34 @@ class Game {
     this.endPending = 0;
     this.rayc = new THREE.Raycaster();
     this.rayc.far = 2.3;
-    this.buildRain();
+    this.buildWeather();
+    if (env.stars) this.buildSky(moon);
+    this.audio.configure(env);
     this.bindInput();
     document.fonts?.ready.then(() => (this.monT = 0));
   }
 
   buildArm() {
-    const skin = std(0xd4a48a, 0.65);
-    const sleeve = std(0x2d3a4a, 0.9);
-    this.arm = new THREE.Group();
-    this.hand = new THREE.Group();
-    const palm = mesh(new THREE.SphereGeometry(0.042, 16, 12), skin, 0.005, -0.012, 0.012);
-    palm.scale.set(1.0, 0.6, 1.2);
-    this.hand.add(palm);
-    // fingers curl up and around whatever is held
-    for (let i = 0; i < 4; i++) {
-      const f = mesh(new THREE.CapsuleGeometry(0.0095, 0.03, 4, 8), skin, -0.024 + i * 0.016, 0.006, -0.03);
-      f.rotation.x = 1.25;
-      f.scale.setScalar(i === 3 ? 0.85 : 1);
-      this.hand.add(f);
-    }
-    const thumb = mesh(new THREE.CapsuleGeometry(0.01, 0.03, 4, 8), skin, -0.04, 0.012, -0.004);
-    thumb.rotation.set(0.6, 0, 0.9);
-    this.hand.add(thumb);
-    const wrist = mesh(new THREE.CylinderGeometry(0.034, 0.03, 0.05, 12), skin, 0.004, -0.012, 0.06);
-    wrist.rotation.x = Math.PI / 2;
-    this.hand.add(wrist);
-    this.sleeve = mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.5, 12), sleeve);
-    this.cuff = mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.03, 12), std(0x1a222c, 0.9));
-    this.arm.add(this.hand, this.sleeve, this.cuff);
-    this.vmGroup.add(this.arm);
-    // the always-carried flashlight, shown when the hand is free
-    this.torch = new THREE.Group();
-    const body = mesh(new THREE.CylinderGeometry(0.019, 0.016, 0.2, 14), std(0x151515, 0.5), 0, 0, 0);
-    body.rotation.x = Math.PI / 2;
-    this.torch.add(body);
-    this.torchLens = new THREE.MeshStandardMaterial({ color: 0x333333, emissive: 0xeef2ff, emissiveIntensity: 0 });
-    const lens = mesh(new THREE.CylinderGeometry(0.023, 0.023, 0.02, 14), this.torchLens, 0, 0, -0.105);
-    lens.rotation.x = Math.PI / 2;
-    this.torch.add(lens);
-    this.torch.position.set(0.2, -0.22, -0.4);
-    this.vmGroup.add(this.torch);
+    this.vm = new ViewModel(this.vmGroup);
+    this.torch = this.vm.torch;
+    this.torchLens = this.vm.lensMat;
   }
 
-  buildRain() {
-    const N = 1800;
-    const pos = new Float32Array(N * 6);
+  // rain streaks or slow drifting snow, recycled in a box around the camera
+  buildWeather() {
+    this.rain = null;
+    const w = this.env.weather;
+    if (w === 'none') return;
+    this.snow = w === 'snow';
+    const N = this.snow ? 1400 : 1800;
+    const pos = new Float32Array(N * (this.snow ? 3 : 6));
     this.rainData = [];
-    for (let i = 0; i < N; i++) this.rainData.push({ x: 0, y: 0, z: 0, v: rand(9, 13) });
+    for (let i = 0; i < N; i++) this.rainData.push({ x: 0, y: 0, z: 0, v: this.snow ? rand(0.5, 1.1) : rand(9, 13), ph: rand(0, 6) });
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.rain = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x8090b0, transparent: true, opacity: 0.35 }));
+    this.rain = this.snow
+      ? new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xdfe6f0, size: 0.06, map: TX.orbSprite(), transparent: true, opacity: 0.9, depthWrite: false }))
+      : new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x8090b0, transparent: true, opacity: 0.35 }));
     this.rain.frustumCulled = false;
     this.scene.add(this.rain);
     this.rainData.forEach((d) => this.respawnDrop(d, true));
@@ -298,7 +290,7 @@ class Game {
       d.x = c.x + rand(-14, 14);
       d.z = c.z + rand(-14, 14);
       const L = this.level, vb = L.vanBounds;
-      const inHouse = d.x > -0.6 && d.x < L.GW + 0.6 && d.z > -0.6 && d.z < L.GH + (L.map.id === 'cabin' ? 1.9 : 0.6);
+      const inHouse = d.x > -0.6 && d.x < L.GW + 0.6 && d.z > -0.6 && d.z < L.GH + (L.map.porch ?? 0.6);
       const inVan = d.x > vb.minX - 0.1 && d.x < vb.maxX + 0.1 && d.z > vb.minZ - 0.1 && d.z < vb.maxZ + 1.6;
       if (!inHouse && !inVan) break;
       d.x = -999;
@@ -307,7 +299,21 @@ class Game {
   }
 
   updateRain(dt) {
+    if (!this.rain) return;
     const arr = this.rain.geometry.attributes.position.array;
+    if (this.snow) {
+      this.rainData.forEach((d, i) => {
+        d.y -= d.v * dt;
+        d.ph += dt;
+        d.x += Math.sin(d.ph * 1.3) * 0.3 * dt + 0.15 * dt;
+        if (d.y < 0 || Math.abs(d.x - this.camera.position.x) > 15 || Math.abs(d.z - this.camera.position.z) > 15) this.respawnDrop(d);
+        arr[i * 3] = d.x;
+        arr[i * 3 + 1] = d.y;
+        arr[i * 3 + 2] = d.z;
+      });
+      this.rain.geometry.attributes.position.needsUpdate = true;
+      return;
+    }
     this.rainData.forEach((d, i) => {
       d.y -= d.v * dt;
       if (d.y < 0 || Math.abs(d.x - this.camera.position.x) > 15 || Math.abs(d.z - this.camera.position.z) > 15) this.respawnDrop(d);
@@ -320,6 +326,26 @@ class Game {
       arr[o + 5] = d.z;
     });
     this.rain.geometry.attributes.position.needsUpdate = true;
+  }
+
+  // clear-sky maps get stars and a visible full moon in the direction of the moonlight
+  buildSky(moon) {
+    const n = 900, pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, e = Math.acos(Math.random() * 0.9);
+      pos[i * 3] = Math.cos(a) * Math.sin(e) * 120;
+      pos[i * 3 + 1] = Math.cos(e) * 120;
+      pos[i * 3 + 2] = Math.sin(a) * Math.sin(e) * 120;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.stars = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xcfd8ff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.8 }));
+    this.scene.add(this.stars);
+    const disc = new THREE.Sprite(new THREE.SpriteMaterial({ map: TX.orbSprite(), color: 0xe8eeff, fog: false, depthWrite: false }));
+    disc.scale.setScalar(9);
+    this.moonDisc = disc;
+    this.moonDir = moon.position.clone().sub(moon.target.position).normalize();
+    this.scene.add(disc);
   }
 
   // ---------------------------------------------------------------- input
@@ -347,12 +373,13 @@ class Game {
     window.addEventListener('keyup', (e) => (p.keys[e.code] = false));
     window.addEventListener('keydown', (e) => {
       p.keys[e.code] = true;
+      if (e.repeat) return;
       if (e.code === 'KeyJ' || (e.code === 'Escape' && this.state === 'journal')) {
         if (this.state === 'playing' && p.alive) this.openJournal();
         else if (this.state === 'journal') this.closeJournal();
         return;
       }
-      if (this.state !== 'playing' || !p.alive) return;
+      if (this.state !== 'playing' || !p.alive || e.repeat) return;
       switch (e.code) {
         case 'KeyE':
           this.interact();
@@ -597,7 +624,7 @@ class Game {
     if (this.endPending > 0) this.endPending -= dt;
     p.update(dt, A);
     L.update(dt, A);
-    L.updateLights(dt, gh.pos, gh.hunting && gh.huntPhase === 'chase');
+    L.updateLights(dt, gh.pos, gh.hunting && gh.huntPhase === 'chase', A);
     this.items.update(dt);
     gh.update(dt);
 
@@ -614,7 +641,15 @@ class Game {
     // flashlight + UV
     const nearHunt = gh.hunting && gh.huntPhase === 'chase' && gh.pos.distanceTo(p.pos) < 10;
     const flick = nearHunt && Math.random() < 0.5;
-    this.flashlight.intensity = this.flashOn && !flick ? 20 : 0;
+    // eye adaptation: dim the beam on a wall right in front of you and inside the lit van,
+    // so close surfaces (whiteboard, monitors) never blow out to pure white
+    let beam = 20;
+    this.beamRay ||= new THREE.Raycaster(undefined, undefined, 0, 4);
+    this.beamRay.setFromCamera({ x: 0, y: 0 }, this.camera);
+    const near = this.beamRay.intersectObjects(L.occluders, false)[0];
+    if (near) beam *= clamp(Math.pow(near.distance / 3, 1.3), 0.18, 1);
+    if (L.inVan(p.pos)) beam *= 0.3;
+    this.flashlight.intensity = this.flashOn && !flick ? beam : 0;
     this.torchLens.emissiveIntensity = this.flashlight.intensity > 0 ? 3 : 0;
     const uv = this.items.uvActive();
     this.uvLight.intensity = uv && !flick ? 14 : 0;
@@ -634,6 +669,10 @@ class Game {
     this.updateLook();
     this.updateViewmodel(dt);
     this.updateRain(dt);
+    if (this.stars) {
+      this.stars.position.copy(this.camera.position);
+      this.moonDisc.position.copy(this.camera.position).addScaledVector(this.moonDir, 110);
+    }
     A.updateListener(this.camera);
     const fear = clamp(1 - this.sanity / 100, 0, 1);
     A.setEnvironment(!p.inHouse, fear);
@@ -653,7 +692,7 @@ class Game {
       A.creak(L.randomPointInRoom(r).setY(2.4), { vol: 0.25 });
     }
     // lightning: the sky and every window flash, thunder follows after a short delay
-    this.thunderT -= dt;
+    if (this.env.weather === 'rain') this.thunderT -= dt;
     if (this.thunderT <= 0) {
       this.thunderT = rand(25, 70);
       this.flash = 0.45;
@@ -682,7 +721,7 @@ class Game {
       this.crackleT = rand(0.08, 0.5);
       for (const fire of [L.fireLight, L.stoveLight]) if (fire && fire.position.distanceTo(p.pos) < 9) A.crackle(fire.position);
     }
-    if (L.map.ground === 'forest') {
+    if (this.env.owls) {
       this.owlT -= dt;
       if (this.owlT <= 0) {
         this.owlT = rand(30, 70);
@@ -798,24 +837,14 @@ class Game {
     const bob = Math.sin(p.bob * 2) * 0.008 * Math.min(1, p.moving);
     const sway = Math.cos(p.bob) * 0.01 * Math.min(1, p.moving);
     this.torch.visible = !h;
-    const anchor = new THREE.Vector3();
     if (h) {
       h.mesh.position.set(h.holdPos.x + sway, h.holdPos.y + bob, h.holdPos.z);
       h.mesh.rotation.copy(h.holdRot);
-      anchor.set(h.holdPos.x + sway + 0.01, h.holdPos.y + bob - 0.02, h.holdPos.z + 0.07);
     } else {
-      this.torch.position.set(0.2 + sway, -0.22 + bob, -0.4);
-      anchor.set(0.21 + sway, -0.235 + bob, -0.34);
+      this.torch.position.set(0.19 + sway, -0.21 + bob, -0.38);
+      this.torch.rotation.set(0.04, 0.06, 0);
     }
-    if (!p.alive) anchor.y -= 0.6;
-    this.hand.position.copy(anchor);
-    const shoulder = new THREE.Vector3(0.36, -0.62, 0.05);
-    const mid = anchor.clone().lerp(shoulder, 0.5);
-    this.sleeve.position.copy(mid).lerp(anchor, 0.08);
-    this.sleeve.lookAt(this.vmGroup.localToWorld(shoulder.clone()));
-    this.sleeve.rotateX(Math.PI / 2);
-    this.cuff.position.copy(anchor).lerp(shoulder, 0.1);
-    this.cuff.quaternion.copy(this.sleeve.quaternion);
+    this.vm.update(h ? h.mesh : this.torch, h ? h.grip : TORCH_GRIP, p.alive);
     // viewmodel brightness follows the local lighting
     const room = this.level.rooms[p.room];
     const lit = (room && room.lightOn) || this.level.inVan(p.pos);

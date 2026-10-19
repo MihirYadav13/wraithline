@@ -53,7 +53,8 @@ export default {
   siding: 'wood_plank_wall',
   sidingColor: 0x8a7a6a,
   trimColor: 0x3a2a1e,
-  fog: 0.075,
+  porch: 1.9,
+  env: { weather: 'none', sky: 0x04080a, fog: 0x07100e, fogDensity: 0.07, ambient: 0x18241e, moon: 0xa8b8d8, moonI: 0.85, crickets: 1.8, wind: 0.8, owls: true, stars: true },
   furnish(L) {
     const M = L.mat;
     const iron = std(0x1a1a1a, 0.6, { metalness: 0.5 });

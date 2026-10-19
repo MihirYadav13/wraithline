@@ -257,7 +257,10 @@ export class Ghost {
     const from = this.headPos();
     const to = p.camera.position.clone();
     const dist = from.distanceTo(to);
-    if (dist > 22) return false;
+    // crouching in a dark room makes you hard to spot from a distance
+    const room = this.game.level.rooms[p.room];
+    const maxDist = p.crouch && room && !room.lightOn ? 7 : 22;
+    if (dist > maxDist) return false;
     const ray = new THREE.Raycaster(from, to.clone().sub(from).normalize(), 0, dist);
     return ray.intersectObjects(this.game.level.getOccluders(), false).length === 0;
   }
@@ -553,7 +556,17 @@ export class Ghost {
     if (this.repathT <= 0) {
       this.repathT = 0.35;
       if (this.lastKnown) this.goTo(this.lastKnown);
-      else if (!this.path.length) this.goTo(L.randomPointInRoom(Math.floor(Math.random() * L.rooms.length)));
+      else {
+        // a player shut inside a room it didn't see them enter is safe: the ghost roams elsewhere
+        const pr = player.room;
+        const hidden = pr >= 0 && L.isSealed(pr);
+        const last = this.path[this.path.length - 1];
+        if (hidden && last && L.roomAt(last.x, last.z) === pr) this.path = [];
+        if (!this.path.length) {
+          const choices = L.rooms.filter((r) => !(hidden && r.id === pr));
+          this.goTo(L.randomPointInRoom(pick(choices).id));
+        }
+      }
     }
     let speed = this.type.speed;
     if (this.type.name === 'Revenant') speed = sees ? 3.0 : 1.0;
