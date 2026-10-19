@@ -11,9 +11,25 @@ van and buildings are modelled in code; and all audio is synthesised live with t
 | Map | Description |
 | --- | --- |
 | **14 Willow Lane** | Single-storey family home: hallway, master bedroom, bathroom, nursery, kitchen, dining and living room. Picket fence, front yard. |
-| **Pine Hollow Cabin** | Log cabin in a forest: log walls, plank ceilings, wall sconces, wood stove, iron bed frames, bunk room, porch and a fire pit. Thick fog. |
+| **Pine Hollow Cabin** | Log cabin in a forest: log walls, plank ceilings, wall sconces, wood stove, iron bed frames, bunk room, porch and a fire pit. Clear starry sky, green fog, owls. |
+| **St. Agnes Sanatorium** | Abandoned hospital wing in the snow: long corridor of flickering fluorescent tubes, patient ward, nurse station, padded cell, morgue. |
 
-Pick the map on the main menu. Both have rain, lightning and thunder.
+Pick the map on the main menu. Willow Lane has rain, lightning and thunder.
+
+## Multiplayer (same Wi-Fi, up to 4 players)
+
+1. The host starts the game with `npm run host` instead of `npm run dev`. Vite prints a
+   **Network** address such as `http://192.168.1.20:5173`. If Windows asks, allow Node.js on
+   **private** networks.
+2. Everyone opens that Network address in Chrome (the host can use it too).
+3. Type a name. The host clicks **Host game** and reads out the 4-letter code; friends type it and
+   click **Join**.
+4. The host picks the map and difficulty and clicks **Start investigation**.
+
+The host's browser runs the ghost; keep it open (it keeps running in the background). Everyone
+has their own sanity and journal; hunts trigger on the team's average sanity. If you die you
+keep drifting around as a spirit. Anyone alive can end the contract from the van laptop.
+Playing over the internet needs the game hosted on a server (not set up yet).
 
 ## Run it
 
@@ -24,7 +40,7 @@ npm install
 npm run dev
 ```
 
-Vite opens http://localhost:5173. Click **Start investigation** and the mouse is captured
+Vite opens http://localhost:5173 (use `npm run host` for multiplayer, see below). Click **Start investigation** and the mouse is captured
 (press Esc to pause). Headphones are strongly recommended — sound is positional.
 
 For a production build: `npm run build`, then `npm run preview`.
@@ -89,5 +105,8 @@ throws things). Read about them in the journal.
 | `src/audio.js` | Procedural sound engine (footsteps, creaks, whispers, spirit box, hunts, ambience) |
 | `src/textures.js` | Procedural canvas textures |
 | `src/ui.js` | HUD, journal and menus |
+| `src/viewmodel.js` | First-person hand, arm and flashlight |
+| `src/net.js`, `src/multiplayer.js`, `src/avatar.js` | Multiplayer client, world sync and teammate characters |
+| `server/relay.js` | WebSocket relay used for multiplayer (attached to the Vite server) |
 
 The menu has a **Graphics** setting; use *Low* on integrated GPUs (it disables bloom and the moon shadow and lowers the render resolution).
