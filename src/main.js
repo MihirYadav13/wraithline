@@ -19,6 +19,9 @@ import { Items } from './items.js';
 import { Ghost } from './ghost.js';
 import { UI } from './ui.js';
 import { ViewModel, TORCH_GRIP } from './viewmodel.js';
+import { Net } from './net.js';
+import { Multiplayer, withSeed } from './multiplayer.js';
+import { GHOST_TYPES } from './ghostTypes.js';
 import { EVIDENCE } from './ghostTypes.js';
 import { rand, pick, clamp, mesh, std } from './util.js';
 import * as TX from './textures.js';
@@ -74,6 +77,7 @@ class Game {
     this.locked = false;
     this.last = performance.now();
     this.bindMenu();
+    this.startBackgroundTicker();
     window.addEventListener('resize', () => this.resize());
     requestAnimationFrame((t) => this.loop(t));
   }
@@ -103,7 +107,8 @@ class Game {
     );
     document.getElementById('vol').addEventListener('input', (e) => this.audio.setVolume(+e.target.value));
     document.getElementById('sens').addEventListener('input', (e) => this.player && (this.player.sensitivity = +e.target.value));
-    document.getElementById('start').addEventListener('click', () => this.start());
+    document.getElementById('start').addEventListener('click', () => this.startClicked());
+    this.bindLobby();
     document.getElementById('resume').addEventListener('click', () => this.resume());
     // pause-menu sliders mirror the main-menu ones
     for (const [pid, mid] of [['pvol', 'vol'], ['psens', 'sens']]) {
@@ -118,7 +123,64 @@ class Game {
     document.getElementById('again').addEventListener('click', () => location.reload());
   }
 
-  async start() {
+  // ---- multiplayer lobby
+  bindLobby() {
+    const $ = (id) => document.getElementById(id);
+    const lobby = $('mplobby');
+    const nameIn = $('pname');
+    try {
+      nameIn.value = localStorage.getItem('wraithline-name') || '';
+    } catch {}
+    const name = () => {
+      const n = nameIn.value.trim() || 'Investigator';
+      try {
+        localStorage.setItem('wraithline-name', n);
+      } catch {}
+      return n;
+    };
+    const net = (this.net = new Net());
+    const render = () => {
+      if (!net.code) return;
+      const list = net.players.map((p) => `<li>${p.name}${p.host ? ' (host)' : ''}${p.id === net.id ? ' — you' : ''}</li>`).join('');
+      const local = /^(localhost|127.)/.test(location.hostname);
+      lobby.innerHTML = `Room code <span class="code">${net.code}</span><ul>${list}</ul>` +
+        (net.isHost
+          ? (local ? '<span class="small-tip">Friends cannot reach "localhost": start the game with <b>npm run host</b> and share the Network address it prints.</span>' : `<span class="small-tip">Friends open <b>${location.origin}</b> and join with this code.</span>`)
+          : '<span class="small-tip">Waiting for the host to start...</span>');
+      $('start').textContent = net.isHost ? `Start investigation (${net.players.length} player${net.players.length > 1 ? 's' : ''})` : 'Waiting for host...';
+      $('start').disabled = !net.isHost;
+      document.querySelectorAll('#maps button, #difficulty button').forEach((b) => (b.disabled = !net.isHost));
+    };
+    const fail = (m) => (lobby.innerHTML = `<span class="err">${m}</span>`);
+    net.on('roster', render);
+    net.on('error', (m, fatal) => {
+      if (this.state === 'menu' || !fatal) fail(m);
+    });
+    net.on('msg', (d) => {
+      if (d.t === 'start' && this.state === 'menu') {
+        this.mapKey = d.map;
+        this.diffKey = d.diff;
+        this.start(d.seed);
+      }
+    });
+    $('mphost').addEventListener('click', () => net.host(name()).catch((e) => fail(e.message)));
+    $('mpjoin').addEventListener('click', () => {
+      const code = $('mpcode').value.trim().toUpperCase();
+      if (code.length !== 4) return fail('Enter the 4-letter room code.');
+      net.join(code, name()).catch((e) => fail(e.message));
+    });
+  }
+
+  startClicked() {
+    const seed = Math.floor(Math.random() * 2 ** 31);
+    if (this.net?.code) {
+      if (!this.net.isHost) return;
+      this.net.send({ t: 'start', map: this.mapKey, diff: this.diffKey, seed });
+    }
+    this.start(seed);
+  }
+
+  async start(seed = Math.floor(Math.random() * 2 ** 31)) {
     if (this.starting) return;
     this.starting = true;
     const btn = document.getElementById('start');
@@ -132,7 +194,14 @@ class Game {
     this.audio.setVolume(+document.getElementById('vol').value);
     this.diff = DIFFS[this.diffKey];
     this.quality = document.getElementById('quality').value;
-    this.buildWorld();
+    // same seed => identical house, ghost and objectives on every player's machine
+    withSeed(seed, () => this.buildWorld());
+    if (this.net && this.net.code) {
+      this.mp = new Multiplayer(this, this.net);
+      // spread the team out along the van so nobody spawns inside someone else
+      const order = this.net.players.findIndex((pl) => pl.id === this.net.id);
+      this.player.pos.z -= order * 0.9;
+    }
     this.player.sensitivity = +document.getElementById('sens').value;
     this.ui.show('#menu', false);
     this.ui.show('#hud', true);
@@ -431,7 +500,8 @@ class Game {
     this.state = 'paused';
     Object.keys(this.player.keys).forEach((k) => (this.player.keys[k] = false));
     this.ui.show('#pause', true);
-    this.audio.ctx?.suspend();
+    // multiplayer never stops the world: the menu just sits on top of it
+    if (!this.mp) this.audio.ctx?.suspend();
   }
 
   resume() {
@@ -470,13 +540,20 @@ class Game {
       }
       obj.target = obj.open > 0.5 ? 0 : 1;
       if (obj.target === 1) this.audio.creak(obj.center, { vol: 0.35, dur: 0.6 });
+      if (this.mp && !this.mp.isHost) this.mp.send({ t: 'door', i: L.doors.indexOf(obj), v: obj.target }, this.net.hostId);
     } else if (kind === 'switch') {
       L.setLight(obj, !obj.lightOn);
       this.audio.click(obj.switchMesh.position, 0.5);
+      if (this.mp && !this.mp.isHost) this.mp.send({ t: 'light', i: obj.id, v: obj.lightOn }, this.net.hostId);
     } else if (kind === 'item') {
       this.items.pickup(obj);
     } else if (kind === 'terminal') {
-      if (this.endPending > 0) this.finish(false);
+      if (this.endPending > 0) {
+        const guess = this.ui.guessType?.name ?? null;
+        if (!this.mp) this.finish(false);
+        else if (this.mp.isHost) this.mp.endContract(guess, `${this.net.nameOf(this.net.id)} ended the investigation.`);
+        else this.mp.send({ t: 'endreq', guess }, this.net.hostId);
+      }
       else {
         this.endPending = 4;
         this.ui.toast(this.ui.guessType ? 'Press [E] again to leave and end the contract' : 'You have not chosen a ghost type in your journal [J]. Press [E] again to leave anyway', 4000);
@@ -513,31 +590,62 @@ class Game {
   addPrintOnDoor(door, from) {
     const local = door.leaf.worldToLocal(from.clone().setY(1));
     const side = local.z >= 0 ? 1 : -1;
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.19), this.printMat());
-    m.position.set(rand(0.6, 0.8), rand(0.95, 1.35), side * 0.026);
-    if (side < 0) m.rotation.y = Math.PI;
-    m.rotation.z = rand(-0.4, 0.4);
-    this.addPrint(m, door.leaf);
+    this.placePrint({ on: 'door', i: this.level.doors.indexOf(door), x: rand(0.6, 0.8), y: rand(0.95, 1.35), z: side * 0.026, ry: side < 0 ? Math.PI : 0, rz: rand(-0.4, 0.4) }, true);
   }
 
   addPrintOnSwitch(room) {
-    const sw = room.switchMesh;
+    this.placePrint({ on: 'switch', i: room.id, x: rand(-0.08, 0.08), y: rand(0.05, 0.14), z: 0.012, ry: 0, rz: rand(-0.4, 0.4) }, true);
+  }
+
+  // a handprint described by where it is; the host shares the description with everyone
+  placePrint(desc, share = false) {
+    const parent = desc.on === 'door' ? this.level.doors[desc.i].leaf : this.level.rooms[desc.i].switchMesh;
     const m = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.19), this.printMat());
-    m.position.set(rand(-0.08, 0.08), rand(0.05, 0.14), 0.012);
-    m.rotation.z = rand(-0.4, 0.4);
-    this.addPrint(m, sw);
+    m.position.set(desc.x, desc.y, desc.z);
+    m.rotation.set(0, desc.ry, desc.rz);
+    this.addPrint(m, parent);
+    if (share && this.mp) this.mp.send({ t: 'print', desc });
   }
 
   drainSanity(n) {
     this.sanity = Math.max(0, this.sanity - n);
   }
 
-  tvOn(sec) {
+  // ---- investigators the ghost can sense: you, plus remote players in multiplayer
+  localTarget() {
+    const p = this.player;
+    return { id: this.mp?.id ?? 'me', local: true, pos: p.pos, eye: this.camera.position, alive: p.alive, inHouse: p.inHouse, room: p.room, crouch: p.crouch, electronics: this.items.electronicsActive() };
+  }
+
+  targets() {
+    const list = [this.localTarget()];
+    if (this.mp) list.push(...this.mp.remoteTargets());
+    return list;
+  }
+
+  // hunts trigger on the average sanity of everyone still alive
+  teamSanity() {
+    const s = this.mp ? this.mp.teamSanities() : [this.sanity];
+    return s.length ? s.reduce((a, b) => a + b, 0) / s.length : this.sanity;
+  }
+
+  drainSanityFor(t, n) {
+    if (t.local) this.drainSanity(n);
+    else this.mp.send({ t: 'drain', n }, t.id);
+  }
+
+  killTarget(t, ghost) {
+    if (t.local) {
+      if (this.player.alive) this.killPlayer(ghost);
+    } else this.mp.killRemote(t.id);
+  }
+
+  tvOn(sec, silent = false) {
     if (!this.level.tv) return;
     this.tvT = sec;
     this.level.tv.on = true;
     this.level.tv.mat.color.setHex(0xffffff);
-    this.audio.tvStatic(this.level.tv.pos, sec);
+    if (!silent) this.audio.tvStatic(this.level.tv.pos, sec);
   }
 
   onHuntStart() {
@@ -565,11 +673,22 @@ class Game {
     this.audio.scream(hp, 1.2, 2.2);
     this.flashOn = true;
     setTimeout(() => this.ui.show('#death', true), 1400);
-    setTimeout(() => this.finish(true), 5000);
+    if (!this.mp) {
+      setTimeout(() => this.finish(true), 5000);
+      return;
+    }
+    setTimeout(() => {
+      if (this.state === 'ended') return;
+      this.ui.show('#death', false);
+      p.spirit = true;
+      this.canvas.style.filter = 'grayscale(0.85) brightness(1.1) contrast(1.1)';
+      this.ui.toast('You are dead. Drift around as a spirit while your team finishes the job.', 6000);
+    }, 4500);
   }
 
-  finish(dead, abandoned = false) {
+  finish(dead, abandoned = false, net = null) {
     if (this.state === 'ended') return;
+    if (this.mp && !net && !abandoned) return; // in multiplayer the host ends the contract for everyone
     this.state = 'ended';
     document.exitPointerLock();
     this.ghost.voice?.stop();
@@ -579,7 +698,8 @@ class Game {
     this.ui.show('#journal', false);
     this.ui.show('#death', false);
     const gt = this.ghost.type;
-    const guess = this.ui.guessType;
+    const guess = net ? GHOST_TYPES.find((t) => t.name === net.guess) || null : this.ui.guessType;
+    dead = dead || !this.player.alive;
     const correct = guess && guess.name === gt.name;
     const m = this.diff.mult;
     const idPay = correct ? 50 * m : 0;
@@ -589,6 +709,7 @@ class Game {
       .map((o) => `<div class="${this.objectives.done.has(o) ? 'good' : 'bad'}">${this.objectives.done.has(o) ? '✔' : '✘'} ${OBJECTIVES[o]}</div>`)
       .join('');
     document.getElementById('report').innerHTML = `
+      ${net?.reason ? `<div>${net.reason}</div>` : ''}
       <div>${abandoned ? '<span class="bad">Contract abandoned.</span>' : dead ? '<span class="bad">You did not make it out.</span>' : '<span class="good">You made it out alive.</span>'}</div>
       <div>Difficulty: ${this.diff.name} &nbsp;·&nbsp; Time in the field: ${Math.floor(this.time / 60)}m ${Math.floor(this.time % 60)}s</div>
       <hr>
@@ -606,12 +727,35 @@ class Game {
   }
 
   // ---------------------------------------------------------------- update
+  get simulating() {
+    return this.state === 'playing' || this.state === 'journal' || (this.state === 'paused' && !!this.mp);
+  }
+
+  // Browsers stop requestAnimationFrame in background tabs. In multiplayer that would freeze the
+  // world for the whole team when someone alt-tabs, so a worker timer keeps the game ticking.
+  startBackgroundTicker() {
+    const src = 'setInterval(() => postMessage(0), 50);';
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    w.onmessage = () => {
+      if (!document.hidden || !this.mp || !this.scene) return;
+      const now = performance.now();
+      const dt = Math.min(0.1, (now - this.last) / 1000);
+      this.last = now;
+      if (this.simulating) this.update(dt);
+    };
+  }
+
   loop(now) {
-    const dt = Math.min(0.05, (now - this.last) / 1000);
+    // slow frames (under 20 fps) advance in two half steps instead of running in slow motion
+    const raw = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     if (this.scene) {
-      if (this.state === 'playing' || this.state === 'journal') this.update(dt);
-      else if (this.state === 'ended') this.player.update(dt, this.audio);
+      if (this.simulating) {
+        if (raw > 0.05) {
+          this.update(raw / 2);
+          if (this.simulating) this.update(raw / 2);
+        } else this.update(raw);
+      } else if (this.state === 'ended') this.player.update(raw, this.audio);
       this.render();
     }
     requestAnimationFrame((t) => this.loop(t));
@@ -626,10 +770,12 @@ class Game {
     L.update(dt, A);
     L.updateLights(dt, gh.pos, gh.hunting && gh.huntPhase === 'chase', A);
     this.items.update(dt);
-    gh.update(dt);
+    const follower = this.mp && !this.mp.isHost;
+    if (!follower) gh.update(dt);
+    this.mp?.update(dt);
 
-    // temperatures drift toward their targets; the ghost room gets cold
-    for (const r of L.rooms) {
+    // temperatures drift toward their targets; the ghost room gets cold (host/solo only)
+    if (!follower) for (const r of L.rooms) {
       const target = r.id === gh.favRoom ? (gh.hasEv('FREEZE') ? -6 : 5) : 15;
       r.temp += (target - r.temp) * dt * 0.015;
     }
@@ -915,27 +1061,29 @@ class Game {
     {
       const { ctx, tex } = L.monitor;
       frame(ctx, 512, 300, 'Team Sanity');
-      const s = Math.round(this.sanity);
-      ctx.fillStyle = '#eee';
-      ctx.font = font(500, 22);
-      ctx.textAlign = 'right';
-      ctx.fillText('You', 250, 140);
-      ctx.strokeStyle = '#ff3a2a';
-      ctx.shadowColor = '#ff2a1a';
-      ctx.shadowBlur = 10;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.ellipse(320, 132, 46, 30, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(320, 104);
-      ctx.bezierCurveTo(305, 120, 335, 140, 320, 160);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = '#ff5040';
-      ctx.font = font(700, 22);
-      ctx.textAlign = 'center';
-      ctx.fillText(`${s}%`, 320, 140);
+      // one brain per investigator (up to four, in a 2 x 2 grid)
+      const team = [{ name: this.mp ? this.net.nameOf(this.net.id) : 'You', s: this.sanity, alive: this.player.alive }];
+      if (this.mp) for (const av of this.mp.avatars.values()) team.push({ name: av.name, s: av.state.sanity, alive: av.state.alive });
+      team.slice(0, 4).forEach((m, i) => {
+        const cx = team.length === 1 ? 300 : i % 2 ? 390 : 170;
+        const cy = team.length <= 2 ? 135 : i < 2 ? 100 : 175;
+        ctx.strokeStyle = m.alive ? '#ff3a2a' : '#555';
+        ctx.shadowColor = '#ff2a1a';
+        ctx.shadowBlur = m.alive ? 10 : 0;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 40, 26, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = m.alive ? '#ff5040' : '#777';
+        ctx.font = font(700, 20);
+        ctx.textAlign = 'center';
+        ctx.fillText(m.alive ? `${Math.round(m.s)}%` : 'DEAD', cx, cy + 7);
+        ctx.fillStyle = '#ddd';
+        ctx.font = font(500, 14);
+        ctx.textAlign = 'right';
+        ctx.fillText(m.name.slice(0, 12), cx - 48, cy + 5);
+      });
       ctx.font = font(500, 15);
       ctx.fillStyle = this.setupLeft > 0 ? '#9fd8ff' : '#ff8070';
       if (this.setupLeft > 0) {

@@ -34,7 +34,11 @@ class Item {
   }
 
   worldPos() {
-    return this.held ? this.game.camera.position.clone().setY(this.game.camera.position.y - 0.3) : this.mesh.position.clone();
+    if (this.held) return this.game.camera.position.clone().setY(this.game.camera.position.y - 0.3);
+    // carried by another investigator in multiplayer: it is wherever they are
+    const av = this.holder && this.game.mp?.avatars.get(this.holder);
+    if (av) return av.pos.clone().setY(1.2);
+    return this.mesh.position.clone();
   }
 
   hint() {
@@ -302,12 +306,12 @@ class Book extends Item {
   hint() {
     return this.written ? 'Something has been written in it...' : '[G] Drop it near the ghost and wait';
   }
-  write() {
+  write(silent = false) {
     if (this.written) return;
     this.written = true;
     TX.bookPage(this.page.ctx, 256, 170, true);
     this.page.tex.needsUpdate = true;
-    this.game.audio.scribble(this.mesh.position.clone().setY(0.2));
+    if (!silent) this.game.audio.scribble(this.mesh.position.clone().setY(0.2));
   }
 }
 
@@ -357,9 +361,9 @@ class Crucifix extends Item {
   hint() {
     return this.uses > 0 ? `Stops the ghost hunting within ~3 m (${this.uses} uses left)` : 'Burnt out';
   }
-  burn() {
+  burn(silent = false) {
     this.uses--;
-    this.game.audio.sizzle(this.worldPos(), 0.8);
+    if (!silent) this.game.audio.sizzle(this.worldPos(), 0.8);
     this.mat.emissive.setHex(0xff3300);
     this.mat.emissiveIntensity = 1.5;
     setTimeout(() => {
@@ -425,6 +429,8 @@ class Incense extends Item {
     this.lit = true;
     this.burnT = 7;
     g.audio.lighter();
+    // in multiplayer only the host's ghost can be calmed; tell the host
+    if (g.mp && !g.mp.isHost) return g.mp.send({ t: 'itemState', i: this.uid, incense: true }, g.mp.net.hostId);
     const gh = g.ghost;
     const close = gh.pos.distanceTo(this.worldPos().setY(0)) < 5;
     if (close) {
@@ -480,8 +486,11 @@ export class Items {
     this.list = [];
     this.inventory = [null, null, null];
     this.active = 0;
+    this.all = [];
     CLASSES.forEach((C, i) => {
       const item = new C(game);
+      item.uid = i;
+      this.all.push(item);
       const spot = game.level.gearSpots[i];
       item.mesh.position.copy(spot);
       game.scene.add(item.mesh);
@@ -497,11 +506,17 @@ export class Items {
     return this.list.filter((i) => !i.held).map((i) => i.mesh);
   }
 
-  pickup(item) {
+  pickup(item, granted = false) {
     let slot = this.inventory[this.active] ? this.inventory.indexOf(null) : this.active;
     if (slot < 0) {
       this.game.ui.toast('Your hands are full — drop something [G]');
       return false;
+    }
+    const mp = this.game.mp;
+    if (mp && !granted) {
+      // the host decides who gets an item, so two players can't grab the same one
+      if (!mp.isHost) return mp.requestPickup(item), false;
+      if (!mp.hostPickup(item, mp.id)) return this.game.ui.toast('Someone else has that.'), false;
     }
     this.game.scene.remove(item.mesh);
     this.game.vmGroup.add(item.mesh);
@@ -548,10 +563,22 @@ export class Items {
     item.vel.copy(fwd).multiplyScalar(1.2);
     this.inventory[this.active] = null;
     item.onDrop();
+    const mp = this.game.mp;
+    if (mp) {
+      const p = item.mesh.position;
+      const rest = [p.x + fwd.x * 0.25, this.game.level.floorAt(p.x, p.z) + 0.005, p.z + fwd.z * 0.25];
+      if (mp.isHost) item.holder = null;
+      else mp.send({ t: 'drop', i: item.uid, p: rest, ry: item.mesh.rotation.y }, mp.net.hostId);
+    }
     this.game.ui.setSlots(this.inventory, this.active);
   }
 
   consume(item) {
+    item.gone = true;
+    item.mesh.parent?.remove(item.mesh);
+    const mp = this.game.mp;
+    if (mp && !mp.isHost && item.held) mp.send({ t: 'itemState', i: item.uid, gone: true }, mp.net.hostId);
+    item.held = false;
     const idx = this.inventory.indexOf(item);
     if (idx >= 0) this.inventory[idx] = null;
     this.game.vmGroup.remove(item.mesh);

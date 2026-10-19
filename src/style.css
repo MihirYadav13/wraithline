@@ -19,6 +19,13 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 #prompt { position: absolute; left: 50%; top: calc(50% + 26px); transform: translateX(-50%); font-family: 'Orbitron', sans-serif; font-size: 13px; letter-spacing: 1px; color: #eee; text-shadow: 0 0 4px #000, 0 0 2px #000; white-space: nowrap; }
 #hint { position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%); font-family: 'Orbitron', sans-serif; font-size: 12px; color: rgba(255, 255, 255, 0.6); text-shadow: 0 0 3px #000; white-space: nowrap; max-width: 96vw; overflow: hidden; text-overflow: ellipsis; }
 .small-tip { font-size: 14px; color: #666; margin: 8px 0 0; }
+.board input[type=text], .board input:not([type]) { font-family: inherit; font-size: 17px; border: 2px solid #333; border-radius: 4px; background: rgba(255, 255, 255, 0.6); padding: 3px 8px; width: 55%; }
+.mprow { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.mprow input { width: 80px !important; text-transform: uppercase; text-align: center; letter-spacing: 3px; }
+#mplobby { font-size: 16px; min-height: 22px; }
+#mplobby .code { font-size: 30px; letter-spacing: 6px; color: #8a1f1f; }
+#mplobby ul { margin: 4px 0; padding-left: 20px; }
+#mplobby .err { color: #b22; }
 #subtitle { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); font-size: 26px; color: #fff; text-shadow: 0 0 6px #000, 0 0 3px #000; text-align: center; opacity: 0; transition: opacity 0.4s; }
 #subtitle.show { opacity: 1; }
 #toast { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font-family: 'Orbitron', sans-serif; font-size: 15px; color: #f2e6c8; text-shadow: 0 0 5px #000; opacity: 0; transition: opacity 0.4s; text-align: center; }

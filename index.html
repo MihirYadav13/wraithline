@@ -52,6 +52,14 @@
             <label>Graphics <select id="quality"><option value="low">Low (laptops)</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
           </div>
           <div>
+            <h3>Multiplayer <span class="small-tip">(same Wi-Fi, up to 4)</span></h3>
+            <label>Your name <input id="pname" maxlength="16" placeholder="Investigator" /></label>
+            <div class="mprow">
+              <button id="mphost">Host game</button>
+              <input id="mpcode" maxlength="4" placeholder="CODE" />
+              <button id="mpjoin">Join</button>
+            </div>
+            <div id="mplobby"></div>
             <h3>Controls</h3>
             <table class="keys">
               <tr><td>WASD</td><td>Move</td></tr>

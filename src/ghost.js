@@ -251,15 +251,20 @@ export class Ghost {
     this.activityLevel = Math.min(10, this.activityLevel + amount * 2);
   }
 
-  canSeePlayer() {
-    const p = this.game.player;
-    if (!p.alive) return false;
+  // Every living investigator (just you in solo; everyone in multiplayer):
+  // { id, pos, eye, alive, inHouse, room, crouch, electronics }
+  targets() {
+    return this.game.targets().filter((t) => t.alive);
+  }
+
+  canSee(t) {
+    if (!t || !t.alive) return false;
     const from = this.headPos();
-    const to = p.camera.position.clone();
+    const to = t.eye.clone();
     const dist = from.distanceTo(to);
     // crouching in a dark room makes you hard to spot from a distance
-    const room = this.game.level.rooms[p.room];
-    const maxDist = p.crouch && room && !room.lightOn ? 7 : 22;
+    const room = this.game.level.rooms[t.room];
+    const maxDist = t.crouch && room && !room.lightOn ? 7 : 22;
     if (dist > maxDist) return false;
     const ray = new THREE.Raycaster(from, to.clone().sub(from).normalize(), 0, dist);
     return ray.intersectObjects(this.game.level.getOccluders(), false).length === 0;
@@ -308,8 +313,8 @@ export class Ghost {
     this.model.position.set(this.pos.x, 0, this.pos.z);
     let rot = this.facing;
     if (this.eventT > 0 || this.huntPhase === 'chase') {
-      // face the player and twitch
-      const pp = g.player.pos;
+      // face whoever it is after and twitch
+      const pp = (this.target || g.targets()[0]).pos;
       rot = Math.atan2(pp.x - this.pos.x, pp.z - this.pos.z);
       const head = this.model.userData.head;
       if (Math.random() < 0.08) head.rotation.set(rand(-0.3, 0.3), rand(-0.4, 0.4), rand(-0.5, 0.5));
@@ -337,7 +342,7 @@ export class Ghost {
       this.goTo(L.randomPointInRoom(room));
     }
     // interactions
-    const fear = 1 - g.sanity / 100;
+    const fear = 1 - g.teamSanity() / 100;
     this.actT -= dt * this.type.activity * (0.7 + fear * 0.9) * g.diff.activity;
     if (this.actT <= 0) {
       this.actT = rand(5, 12);
@@ -347,7 +352,7 @@ export class Ghost {
     this.huntCheckT -= dt;
     if (this.huntCheckT <= 0) {
       this.huntCheckT = 5;
-      if (g.setupLeft <= 0 && this.huntCooldown <= 0 && this.incenseBlock <= 0 && g.sanity < this.type.huntThreshold && g.player.inHouse) {
+      if (g.setupLeft <= 0 && this.huntCooldown <= 0 && this.incenseBlock <= 0 && g.teamSanity() < this.type.huntThreshold && this.targets().some((t) => t.inHouse)) {
         if (Math.random() < 0.18 + fear * 0.25) this.startHunt();
       }
     }
@@ -365,8 +370,8 @@ export class Ghost {
     const room = L.rooms[this.room];
     if (room) options.push(['light', this.type.name === 'Mare' ? 4 : 1.5]);
     options.push(['sound', 2.5]);
-    const pdist = this.pos.distanceTo(g.player.pos);
-    if (pdist < 9 && g.player.inHouse) options.push(['event', this.type.name === 'Oni' ? 3 : 1.2]);
+    const near9 = this.targets().filter((t) => t.inHouse && this.pos.distanceTo(t.pos) < 9);
+    if (near9.length) options.push(['event', this.type.name === 'Oni' ? 3 : 1.2]);
     const book = g.items.list.find((i) => i.type === 'book' && !i.held && !i.written && near(i.mesh.position, 3.5));
     if (book && this.hasEv('WRITING')) options.push(['write', 5]);
     if (L.tv && !L.tv.on && L.roomAt(L.tv.pos.x, L.tv.pos.z) === this.room) options.push(['tv', 0.8]);
@@ -430,7 +435,7 @@ export class Ghost {
         break;
       }
       case 'event':
-        this.startEvent();
+        this.startEvent(pick(near9));
         g.addEmf(this.pos, emfLevel());
         break;
       case 'write':
@@ -447,9 +452,11 @@ export class Ghost {
     }
   }
 
-  startEvent() {
+  startEvent(t = this.targets().find((x) => x.inHouse)) {
     const g = this.game;
-    const p = g.player.pos;
+    if (!t) return;
+    this.target = t;
+    const p = t.pos;
     // appear somewhere between 2 and 4 m from the player, inside the house
     let spot = null;
     for (let i = 0; i < 12 && !spot; i++) {
@@ -467,7 +474,8 @@ export class Ghost {
     else g.audio.whisper(hp, 0.8);
     const rm = g.level.rooms[g.level.roomAt(p.x, p.z)];
     if (rm) rm.flicker = this.eventT;
-    if (this.canSeePlayer()) g.drainSanity(this.type.eventDrain);
+    // everyone who actually sees the apparition loses sanity
+    for (const x of this.targets()) if (this.canSee(x)) g.drainSanityFor(x, this.type.eventDrain);
     g.objectives.complete('event');
     this.logActivity(2);
   }
@@ -520,7 +528,7 @@ export class Ghost {
       return;
     }
     this.huntT -= dt;
-    if (this.huntT <= 0 || !g.player.alive) {
+    if (this.huntT <= 0 || !this.targets().length) {
       this.endHunt();
       return;
     }
@@ -531,7 +539,6 @@ export class Ghost {
       this.model.visible = on;
       this.blinkT = on ? rand(0.1, 0.35) : rand(0.08, 0.45);
     }
-    const player = g.player;
     const hp = this.headPos();
     this.voice?.update(dt, hp, g.audio.occlusion(hp));
     // footsteps
@@ -540,15 +547,23 @@ export class Ghost {
       this.stepT = 0.48;
       g.audio.footstep(this.pos.clone().setY(0.1), 'wood', this.type.quietSteps ? 0.12 : 1.1);
     }
-    // track the player: sight, or active electronics nearby
+    // track the nearest investigator it can see, or whose electronics are on nearby
     this.repathT -= dt;
-    const pdist = this.pos.distanceTo(player.pos);
-    let sees = false;
-    if (this.blind <= 0 && player.inHouse) {
-      sees = this.canSeePlayer() || (g.items.electronicsActive() && pdist < 7.5);
+    const inside = this.targets().filter((t) => t.inHouse);
+    let sees = false, target = null, pdist = Infinity;
+    if (this.blind <= 0) {
+      for (const t of inside) {
+        const d = this.pos.distanceTo(t.pos);
+        if (d < pdist && (this.canSee(t) || (t.electronics && d < 7.5))) {
+          pdist = d;
+          target = t;
+        }
+      }
+      sees = !!target;
     }
     if (sees) {
-      this.lastKnown = player.pos.clone();
+      this.target = target;
+      this.lastKnown = target.pos.clone();
       this.chaseBoost = Math.min(1, this.chaseBoost + dt * 0.12);
     } else {
       this.chaseBoost = Math.max(0, this.chaseBoost - dt * 0.1);
@@ -557,14 +572,13 @@ export class Ghost {
       this.repathT = 0.35;
       if (this.lastKnown) this.goTo(this.lastKnown);
       else {
-        // a player shut inside a room it didn't see them enter is safe: the ghost roams elsewhere
-        const pr = player.room;
-        const hidden = pr >= 0 && L.isSealed(pr);
+        // players shut inside rooms it didn't see them enter are safe: the ghost roams elsewhere
+        const hiddenRooms = new Set(inside.map((t) => t.room).filter((r) => r >= 0 && L.isSealed(r)));
         const last = this.path[this.path.length - 1];
-        if (hidden && last && L.roomAt(last.x, last.z) === pr) this.path = [];
+        if (last && hiddenRooms.has(L.roomAt(last.x, last.z))) this.path = [];
         if (!this.path.length) {
-          const choices = L.rooms.filter((r) => !(hidden && r.id === pr));
-          this.goTo(L.randomPointInRoom(pick(choices).id));
+          const choices = L.rooms.filter((r) => !hiddenRooms.has(r.id));
+          this.goTo(L.randomPointInRoom(pick(choices.length ? choices : L.rooms).id));
         }
       }
     }
@@ -574,8 +588,8 @@ export class Ghost {
     else speed *= 1 + this.chaseBoost * 0.65;
     if (this.blind > 0) speed *= 0.6;
     if (this.moveAlong(dt, speed) && this.lastKnown && this.pos.distanceTo(this.lastKnown) < 0.3) this.lastKnown = null;
-    if (pdist < 0.85 && player.alive && player.inHouse && this.blind <= 0) {
-      g.killPlayer(this);
+    if (this.blind <= 0) {
+      for (const t of inside) if (this.pos.distanceTo(t.pos) < 0.85) g.killTarget(t, this);
     }
   }
 }

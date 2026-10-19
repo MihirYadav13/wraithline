@@ -883,7 +883,8 @@ export class Level {
       if (d.open < d.target) d.open = Math.min(d.target, d.open + dt * speed);
       else if (d.open > d.target) d.open = Math.max(d.target, d.open - dt * speed);
       if (prev > 0 && d.open === 0 && d.target === 0) {
-        audio.doorClose(d.center, d.slam ? 1 : 0.5);
+        // every player animates doors locally, so this sound must not be relayed (it would repeat)
+        (audio.doorClose.orig || audio.doorClose)(d.center, d.slam ? 1 : 0.5);
         d.slam = false;
       }
       let t = d.t0 + (d.t1 - d.t0) * d.open;

@@ -35,7 +35,7 @@ export class Player {
   }
 
   look(dx, dy) {
-    if (!this.alive) return;
+    if (!this.alive && !this.spirit) return;
     const s = 0.0022 * this.sensitivity;
     this.yaw -= dx * s;
     this.pitch = clamp(this.pitch - dy * s, -1.45, 1.45);
@@ -44,7 +44,8 @@ export class Player {
   update(dt, audio) {
     const k = this.keys;
     let fx = 0, fz = 0;
-    if (this.alive) {
+    // dead players in multiplayer keep moving as spirits
+    if (this.alive || this.spirit) {
       if (k.KeyW) fz -= 1;
       if (k.KeyS) fz += 1;
       if (k.KeyA) fx -= 1;
@@ -76,7 +77,7 @@ export class Player {
     const fy = this.level.floorAt(this.pos.x, this.pos.z);
     this.footY += (fy - this.footY) * Math.min(1, dt * 14);
 
-    const targetEye = this.alive ? (this.crouch ? 1.05 : 1.65) : 0.5;
+    const targetEye = this.alive || this.spirit ? (this.crouch ? 1.05 : 1.65) : 0.5;
     this.eye += (targetEye - this.eye) * Math.min(1, dt * 8);
     const moving = Math.hypot(this.vel.x, this.vel.z);
     this.moving = moving;
