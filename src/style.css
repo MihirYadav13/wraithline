@@ -75,6 +75,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color:
 #report .good { color: #1d6a2a; }
 #report .bad { color: #a01f1f; }
 #report hr { border: none; border-top: 2px dashed #999; }
+.board .center { text-align: center; margin: 10px 0 0; }
+.board input[type=checkbox] { width: 20px; height: 20px; accent-color: #1d3f8a; }
+#feedback { background: rgba(0, 0, 0, 0.7); z-index: 20; }
+#fbstars button { font-size: 28px; padding: 0 8px; border-color: transparent; color: #aaa; }
+#fbstars button.on { color: #c08a10; }
+#fbtext { width: 100%; box-sizing: border-box; margin: 10px 0 0; font-family: inherit; font-size: 17px; border: 2px solid #333; border-radius: 4px; background: rgba(255, 255, 255, 0.6); padding: 6px 8px; resize: vertical; }
+#fbsend:disabled { opacity: 0.4; cursor: default; }
+#fbstatus { min-height: 0; margin: 8px 0 0; }
+#fbstatus .err { color: #b22; }
+#fblink a { color: #1d3f8a; }
 
 /* journal: old book */
 #journal { background: rgba(0, 0, 0, 0.55); }

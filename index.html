@@ -50,6 +50,8 @@
             <label>Volume <input id="vol" type="range" min="0" max="1" step="0.05" value="0.9" /></label>
             <label>Mouse sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.05" value="1" /></label>
             <label>Graphics <select id="quality"><option value="low">Low (laptops)</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
+            <label>Share anonymous play stats <input id="statsopt" type="checkbox" checked /></label>
+            <p id="statstip" class="small-tip"></p>
           </div>
           <div>
             <h3>Multiplayer <span class="small-tip">(same Wi-Fi, up to 4)</span></h3>
@@ -76,6 +78,7 @@
         </div>
         <button id="start" class="big">Start investigation</button>
         <p class="footer">Use headphones. Find the evidence, name the ghost, and get out alive.</p>
+        <p class="center"><button class="fbopen">Send feedback</button></p>
       </div>
     </div>
 
@@ -117,6 +120,23 @@
         <h2>Investigation Report</h2>
         <div id="report"></div>
         <button id="again" class="big">New contract</button>
+        <p class="center"><button class="fbopen">Send feedback</button></p>
+      </div>
+    </div>
+
+    <div id="feedback" class="screen hidden">
+      <div class="board small">
+        <h2>Send feedback</h2>
+        <div id="fbform">
+          <p>How was it?</p>
+          <div id="fbstars"><button data-r="1">★</button><button data-r="2">★</button><button data-r="3">★</button><button data-r="4">★</button><button data-r="5">★</button></div>
+          <textarea id="fbtext" maxlength="1000" rows="4" placeholder="What did you like? What broke? (optional)"></textarea>
+          <p class="small-tip">What is sent: your 1-5 rating, your comment, <span id="fbwhat"></span>and the game version. Your player name is never included, so please leave personal details out of the comment.</p>
+          <button id="fbsend" class="big" disabled>Send</button>
+        </div>
+        <p id="fbstatus"></p>
+        <p id="fblink" class="small-tip">Rather talk? <a target="_blank" rel="noopener">Find us here</a>.</p>
+        <button id="fbclose">Close</button>
       </div>
     </div>
 

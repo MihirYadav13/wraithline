@@ -21,6 +21,8 @@ import { UI } from './ui.js';
 import { ViewModel, TORCH_GRIP } from './viewmodel.js';
 import { Net } from './net.js';
 import { Multiplayer, withSeed } from './multiplayer.js';
+import { track } from './analytics.js';
+import { bindFeedback } from './feedback.js';
 import { GHOST_TYPES } from './ghostTypes.js';
 import { EVIDENCE } from './ghostTypes.js';
 import { rand, pick, clamp, mesh, std } from './util.js';
@@ -80,6 +82,7 @@ class Game {
     this.startBackgroundTicker();
     window.addEventListener('resize', () => this.resize());
     requestAnimationFrame((t) => this.loop(t));
+    track('game_loaded');
   }
 
   // ---------------------------------------------------------------- setup
@@ -121,6 +124,7 @@ class Game {
     }
     document.getElementById('quit').addEventListener('click', () => this.finish(false, true));
     document.getElementById('again').addEventListener('click', () => location.reload());
+    bindFeedback(() => (this.state === 'ended' ? { from: 'results', map: this.mapKey, difficulty: this.diffKey } : { from: 'menu' }));
   }
 
   // ---- multiplayer lobby
@@ -153,6 +157,7 @@ class Game {
     };
     const fail = (m) => (lobby.innerHTML = `<span class="err">${m}</span>`);
     net.on('roster', render);
+    net.on('joined', (m) => track(m.host === m.id ? 'mp_room_created' : 'mp_room_joined'));
     net.on('error', (m, fatal) => {
       if (this.state === 'menu' || !fatal) fail(m);
     });
@@ -209,6 +214,7 @@ class Game {
     this.audio.startAmbient();
     this.lock();
     this.ui.toast('Grab your equipment from the rack, then head inside.', 4500);
+    track('contract_started', { map: this.mapKey, difficulty: this.diffKey, players: this.mp ? this.net.players.length : 1 });
   }
 
   buildWorld() {
@@ -723,6 +729,9 @@ class Game {
       <div>Ghost identification: $${idPay} &nbsp;·&nbsp; Objectives: $${objPay}${dead ? ' &nbsp;·&nbsp; <span class="bad">(death: 50% insurance payout)</span>' : ''}</div>
       <div style="font-size:28px">Total pay: <b>$${total}</b></div>`;
     this.ui.show('#results', true);
+    const minutes = Math.round(this.time / 6) / 10;
+    if (abandoned) track('quit_from_menu', { map: this.mapKey, difficulty: this.diffKey, minutes });
+    else track('contract_finished', { map: this.mapKey, difficulty: this.diffKey, correct: !!correct, died: dead, minutes, objectives_done: this.objectives.done.size });
     if (this.audio.master) this.audio.master.gain.setTargetAtTime(0, this.audio.t, 1.5);
   }
 

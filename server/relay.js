@@ -2,6 +2,7 @@
 // 4-letter code; others join with it. The relay only forwards messages — the host's browser
 // runs the ghost and the world, every other browser follows it.
 import { WebSocketServer } from 'ws';
+import { stats, countPlayers } from './stats.js';
 
 const MAX_PLAYERS = 4;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -43,6 +44,8 @@ export function attachMultiplayer(httpServer) {
       if (m.t === 'create' && !code) {
         code = newCode();
         rooms.set(code, { host: id, players: new Map([[id, { ws, name: cleanName(m.name) }]]) });
+        stats.roomCreated();
+        countPlayers(rooms);
         send(ws, { t: 'joined', code, id, host: id, players: roster(rooms.get(code)) });
       } else if (m.t === 'join' && !code) {
         const room = rooms.get(String(m.code || '').toUpperCase());
@@ -51,13 +54,18 @@ export function attachMultiplayer(httpServer) {
         if (room.started) return send(ws, { t: 'error', message: 'That investigation has already started.' });
         code = String(m.code).toUpperCase();
         room.players.set(id, { ws, name: cleanName(m.name) });
+        stats.joined();
+        countPlayers(rooms);
         send(ws, { t: 'joined', code, id, host: room.host, players: roster(room) });
         for (const [pid, p] of room.players) if (pid !== id) send(p.ws, { t: 'roster', players: roster(room) });
       } else if (m.t === 'relay' && code) {
         // forward to one player, or everyone else in the room
         const room = rooms.get(code);
         if (!room) return;
-        if (m.data && m.data.t === 'start' && id === room.host) room.started = true;
+        if (m.data && m.data.t === 'start' && id === room.host && !room.started) {
+          room.started = true;
+          stats.contractStarted();
+        }
         const out = { t: 'msg', from: id, data: m.data };
         if (m.to) {
           const p = room.players.get(m.to);
@@ -77,6 +85,7 @@ export function attachMultiplayer(httpServer) {
       } else {
         for (const p of room.players.values()) send(p.ws, { t: 'left', id, players: roster(room) });
       }
+      countPlayers(rooms);
     });
   });
   return wss;
